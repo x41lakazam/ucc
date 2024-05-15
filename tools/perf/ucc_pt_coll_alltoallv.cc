@@ -14,8 +14,6 @@
 #include <iostream>
 #include <dirent.h>
 
-
-
 ucc_pt_coll_alltoallv::ucc_pt_coll_alltoallv(ucc_datatype_t dt,
                          ucc_memory_type mt, bool is_inplace,
                          bool is_persistent,
@@ -73,7 +71,6 @@ double parse_transfer_matrix_token(std::string token)
         return val;
 }
 
-
 /**
 * Fill a matrix based on the passed file
 * The file should contain square matrices of size <comm_size>.
@@ -116,7 +113,7 @@ void fill_transfer_matrix(std::vector<std::vector<double>>& transfer_matrix, std
     }
 }
 
-void fill_transfer_matrices(std::vector<std::vector<std::vector<double>>>& transfer_matrices, double default_value=0, std::string transfer_matrices_dir)
+void fill_transfer_matrices(std::vector<std::vector<std::vector<double>>>& transfer_matrices, std::string transfer_matrices_dir)
 {
     std::string fn;
     std::exception_ptr exc;
@@ -187,11 +184,13 @@ ucc_status_t ucc_pt_coll_alltoallv::init_args(size_t count, ucc_pt_test_args_t &
     size_t                              dst_header_size, src_header_size, max_dst_header_size, max_src_header_size;
     ucc_status_t                        st        = UCC_OK;
     int                                 n_matrices = 1;
-    string                              transfer_matrices_dir;
+    std::string                              transfer_matrices_dir;
 
     // Temporary: Forbid usage without transfer matrices
-    if (!std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR") || !std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT"))
-        throw std::invalid_argument("One of those required environment variables were not provided: UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR, UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT");
+    if (!std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR") || !std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT")){
+        std::cerr << "One of those required environment variables were not provided: UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR, UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT" << std::endl;
+        std::terminate();
+    }
     // End of temporary snippet 
 
     if (std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT")){
@@ -210,21 +209,7 @@ ucc_status_t ucc_pt_coll_alltoallv::init_args(size_t count, ucc_pt_test_args_t &
     transfer_matrices.resize(n_matrices, std::vector<std::vector<double>>(comm_size, std::vector<double>(comm_size, count)));
 
     if (std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR"))
-        fill_transfer_matrices(transfer_matrices);
-
-    //DEBUG
-    if (comm_rank == 1){
-        for (int x=0; x < transfer_matrices.size(); x++){
-            for (int y=0; y < transfer_matrices[0].size(); y++){
-                for (int z=0; z < transfer_matrices[0][0].size(); z++){
-                    std::cout << std::to_string(transfer_matrices[x][y][z]) << " "; 
-                }
-                std::cout << "\n";
-            }
-            std::cout << std::endl;
-        }
-    }
-    //---
+        fill_transfer_matrices(transfer_matrices, transfer_matrices_dir);
     
     max_src_header_size = max_dst_header_size = 0;
     for (int mat_ix=0; mat_ix < transfer_matrices.size(); mat_ix++){
