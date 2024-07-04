@@ -984,7 +984,7 @@ typedef struct ucc_context_attr {
  *
  *  @b Description
  *
- *  @ref ucc_context_config_read allocates the @ref ucc_lib_config_h handle and
+ *  @ref ucc_context_config_read allocates the @ref ucc_context_config_h handle and
  *  fetches the configuration values from the run-time environment. The run-time
  *  environment supported are environment variables or a configuration file. It uses
  *  the env_prefix from @ref ucc_lib_config_read. If env_prefix is not NULL, the routine
