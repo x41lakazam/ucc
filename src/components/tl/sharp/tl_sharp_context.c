@@ -92,7 +92,7 @@ static int ucc_tl_sharp_oob_bcast(void *arg, void *buf, int size, int root)
     ucc_status_t            status;
     void                   *req, *tmp_rbuf;
 
-    tmp_rbuf = ucc_malloc(msg_size * oob_coll->n_oob_eps, "tmp_barrier");
+    tmp_rbuf = ucc_malloc(msg_size * oob_coll->n_oob_eps, "tmp_bcast");
     if (!tmp_rbuf) {
         tl_error(ctx->super.super.lib,
                  "failed to allocate %zd bytes for tmp barrier array",
@@ -261,7 +261,10 @@ ucc_tl_sharp_rcache_dump_region_cb(void *context, ucs_rcache_t *rcache, //NOLINT
 static ucc_rcache_ops_t ucc_tl_sharp_rcache_ops = {
     .mem_reg     = ucc_tl_sharp_rcache_mem_reg_cb,
     .mem_dereg   = ucc_tl_sharp_rcache_mem_dereg_cb,
-    .dump_region = ucc_tl_sharp_rcache_dump_region_cb
+    .dump_region = ucc_tl_sharp_rcache_dump_region_cb,
+#ifdef UCS_HAVE_RCACHE_MERGE_CB
+    .merge       = ucc_rcache_merge_cb_empty
+#endif
 };
 
 ucc_status_t ucc_tl_sharp_rcache_create(struct sharp_coll_context *context,
@@ -322,7 +325,7 @@ ucc_status_t ucc_tl_sharp_context_init(ucc_tl_sharp_context_t *sharp_ctx,
     init_spec.enable_thread_support          =
                     (sharp_ctx->tm == UCC_THREAD_MULTIPLE) ? 1 : 0;
 
-    if (lib->cfg.use_internal_oob) {
+    if (lib->cfg.use_internal_oob != UCC_NO && sharp_ctx->super.super.ucc_context->service_team) {
         tl_debug(sharp_ctx->super.super.lib,
                  "using internal oob.  rank:%u size:%lu",
                  oob_ctx->subset.myrank, oob_ctx->subset.map.ep_num);
@@ -377,6 +380,11 @@ UCC_CLASS_INIT_FUNC(ucc_tl_sharp_context_t,
         goto err;
     }
 
+    if (params->params.oob.n_oob_eps < 2) {
+        status = UCC_ERR_NOT_SUPPORTED;
+        goto err;
+    }
+
     UCC_CLASS_CALL_SUPER_INIT(ucc_tl_context_t, &tl_sharp_config->super,
                               params->context);
     memcpy(&self->cfg, tl_sharp_config, sizeof(*tl_sharp_config));
@@ -428,12 +436,13 @@ ucc_status_t ucc_tl_sharp_context_create_epilog(ucc_base_context_t *context)
     set.myrank     = UCC_TL_CTX_OOB(sharp_ctx).oob_ep;
     set.map.ep_num = UCC_TL_CTX_OOB(sharp_ctx).n_oob_eps;
 
-    if (lib->cfg.use_internal_oob) {
+    if (lib->cfg.use_internal_oob != UCC_NO && core_ctx->service_team) {
         sharp_ctx->oob_ctx.subset = set;
     } else {
         sharp_ctx->oob_ctx.oob = &UCC_TL_CTX_OOB(sharp_ctx);
     }
 
+    ucc_assert(core_ctx->topo != NULL);
     status = ucc_topo_init(set, core_ctx->topo, &topo);
     if (UCC_OK != status) {
         tl_error(sharp_ctx->super.super.lib, "failed to init topo");

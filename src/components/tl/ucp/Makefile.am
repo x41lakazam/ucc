@@ -15,6 +15,7 @@ allgather =                        \
 	allgather/allgather_ring.c     \
 	allgather/allgather_neighbor.c \
 	allgather/allgather_bruck.c    \
+	allgather/allgather_sparbit.c  \
 	allgather/allgather_knomial.c
 
 allgatherv =                     \
@@ -112,6 +113,8 @@ sources =                 \
 	tl_ucp_ep.c           \
 	tl_ucp_coll.c         \
 	tl_ucp_service_coll.c \
+	tl_ucp_dpu_offload.h  \
+	tl_ucp_dpu_offload.c  \
 	$(allgather)          \
 	$(allgatherv)         \
 	$(alltoall)           \

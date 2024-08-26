@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * Copyright (c) Meta Platforms, Inc. and affiliates. 2022.
  *
  * See file LICENSE for terms.
@@ -92,6 +92,8 @@ typedef struct ucc_tl_ucp_allreduce_sw_pipeline
     ucc_tl_ucp_allreduce_sw_pipeline;
 typedef struct ucc_tl_ucp_allreduce_sw_host_allgather
     ucc_tl_ucp_allreduce_sw_host_allgather;
+typedef struct ucc_tl_ucp_dpu_offload_buf_info
+    ucc_tl_ucp_dpu_offload_buf_info_t;
 
 typedef struct ucc_tl_ucp_task {
     ucc_coll_task_t super;
@@ -127,19 +129,12 @@ typedef struct ucc_tl_ucp_task {
             ucc_ee_executor_t      *executor;
         } allreduce_kn;
         struct {
-            int                                        reduce_in_progress;
-            ucp_rkey_h                                *src_rkeys; //unpacked
-            ucp_rkey_h                                *dst_rkeys; //unpacked
-            void                                     **sbufs;
-            void                                     **rbufs;
             ucc_tl_ucp_allreduce_sw_pipeline          *pipe;
-            ucc_ee_executor_task_t                    *etask;
-            ucc_ee_executor_t                         *executor;
             ucs_status_ptr_t                          *put_requests;
             ucc_tl_ucp_allreduce_sw_host_allgather    *allgather_data;
-            ucc_schedule_t                            *sw_sched;
-            struct ucc_tl_ucp_allreduce_sw_export_buf *src_ebuf;
-            struct ucc_tl_ucp_allreduce_sw_export_buf *dst_ebuf;
+            ucc_coll_task_t                           *allgather_task;
+            ucc_ee_executor_task_t                    *reduce_task;
+            ucc_tl_ucp_dpu_offload_buf_info_t         *bufs;
         } allreduce_sliding_window;
         struct {
             int                     phase;
@@ -148,6 +143,7 @@ typedef struct ucc_tl_ucp_task {
             ucc_mc_buffer_header_t *scratch_mc_header;
             ucc_ee_executor_task_t *etask;
             ucc_ee_executor_t      *executor;
+            size_t                  max_seg;
         } reduce_scatter_kn;
         struct {
             void                   *scratch;
@@ -205,6 +201,10 @@ typedef struct ucc_tl_ucp_task {
             ucc_mc_buffer_header_t *scratch_header;
             size_t                  scratch_size;
         } allgather_bruck;
+        struct {
+            uint32_t                i;
+            int                     data_expected;
+        } allgather_sparbit;
         struct {
             ucc_rank_t              dist;
             uint32_t                radix;
@@ -360,7 +360,7 @@ ucc_tl_ucp_init_task(ucc_base_coll_args_t *coll_args, ucc_base_team_t *team)
     ucc_coll_task_init(&task->super, coll_args, team);
 
     if (UCC_COLL_ARGS_ACTIVE_SET(&coll_args->args)) {
-        task->tagged.tag = (coll_args->mask & UCC_COLL_ARGS_FIELD_TAG)
+        task->tagged.tag = (coll_args->args.mask & UCC_COLL_ARGS_FIELD_TAG)
             ? coll_args->args.tag : UCC_TL_UCP_ACTIVE_SET_TAG;
         task->flags        |= UCC_TL_UCP_TASK_FLAG_SUBSET;
         task->subset.map    = ucc_active_set_to_ep_map(&coll_args->args);
@@ -368,12 +368,8 @@ ucc_tl_ucp_init_task(ucc_base_coll_args_t *coll_args, ucc_base_team_t *team)
             ucc_ep_map_local_rank(task->subset.map,
                                   UCC_TL_TEAM_RANK(tl_team));
         ucc_assert(coll_args->args.coll_type == UCC_COLL_TYPE_BCAST);
-        /* root value in args corresponds to the  original team ranks,
-           need to convert to subset local value */
-        TASK_ARGS(task).root = ucc_ep_map_local_rank(task->subset.map,
-                                                     coll_args->args.root);
     } else {
-        if (coll_args->mask & UCC_COLL_ARGS_FIELD_TAG) {
+        if (coll_args->args.mask & UCC_COLL_ARGS_FIELD_TAG) {
             task->tagged.tag = coll_args->args.tag;
         } else {
             tl_team->seq_num = (tl_team->seq_num + 1) % UCC_TL_UCP_MAX_COLL_TAG;

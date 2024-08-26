@@ -473,7 +473,7 @@ typedef enum {
  *
  *  @ref ucc_thread_mode_t is used to initialize the UCC library’s thread mode.
  *  The UCC library can be configured in three thread modes UCC_THREAD_SINGLE,
- *  UCC_THREAD_FUNNELED, and UCC_LIB_THREAD_MULTIPLE. In the UCC_THREAD_SINGLE
+ *  UCC_THREAD_FUNNELED, and UCC_THREAD_MULTIPLE. In the UCC_THREAD_SINGLE
  *  mode, the user program must not be multithreaded. In the UCC_THREAD_FUNNELED
  *  mode, the user program may be multithreaded. However, all UCC interfaces
  *  should be invoked from the same thread. In the UCC_THREAD_MULTIPLE mode, the
@@ -1715,24 +1715,24 @@ typedef enum {
  *  @ingroup UCC_COLLECTIVES_DT
  */
 typedef enum {
-    UCC_COLL_ARGS_HINT_OPTMIZE_OVERLAP_CPU  = UCC_BIT(24), /*!< When the flag is
-                                                            set, the user
-                                                            prefers the library
-                                                            to choose an
-                                                            algorithm
-                                                            implementation
-                                                            optimized for the
-                                                            best overlap of CPU
-                                                            resources. */
-    UCC_COLL_ARGS_HINT_OPTMIZE_OVERLAP_GPU  = UCC_BIT(25), /*!< When the flag is
-                                                            set, the user
-                                                            prefers the library
-                                                            to choose an
-                                                            algorithm
-                                                            implementation
-                                                            optimized for the
-                                                            best overlap of GPU
-                                                            resources. */
+    UCC_COLL_ARGS_HINT_OPTIMIZE_OVERLAP_CPU  = UCC_BIT(24), /*!< When the flag is
+                                                              set, the user
+                                                              prefers the library
+                                                              to choose an
+                                                              algorithm
+                                                              implementation
+                                                              optimized for the
+                                                              best overlap of CPU
+                                                              resources. */
+    UCC_COLL_ARGS_HINT_OPTIMIZE_OVERLAP_GPU  = UCC_BIT(25), /*!< When the flag is
+                                                              set, the user
+                                                              prefers the library
+                                                              to choose an
+                                                              algorithm
+                                                              implementation
+                                                              optimized for the
+                                                              best overlap of GPU
+                                                              resources. */
     UCC_COLL_ARGS_HINT_OPTIMIZE_LATENCY     = UCC_BIT(26), /*!<  When the flag is
                                                            set, the user prefers
                                                            the library to choose
