@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * Copyright (c) Meta Platforms, Inc. and affiliates. 2022.
  *
  * See file LICENSE for terms.
@@ -17,7 +17,8 @@
 #include "tl_ucp_tag.h"
 
 #define UCC_UUNITS_AUTO_RADIX 4
-#define UCC_TL_UCP_N_DEFAULT_ALG_SELECT_STR 8
+#define UCC_TL_UCP_TASK_PLUGIN_MAX_DATA 128
+#define UCC_TL_UCP_N_DEFAULT_ALG_SELECT_STR 9
 
 ucc_status_t ucc_tl_ucp_team_default_score_str_alloc(ucc_tl_ucp_team_t *team,
     char *default_select_str[UCC_TL_UCP_N_DEFAULT_ALG_SELECT_STR]);
@@ -92,6 +93,8 @@ typedef struct ucc_tl_ucp_allreduce_sw_pipeline
     ucc_tl_ucp_allreduce_sw_pipeline;
 typedef struct ucc_tl_ucp_allreduce_sw_host_allgather
     ucc_tl_ucp_allreduce_sw_host_allgather;
+typedef struct ucc_tl_ucp_dpu_offload_buf_info
+    ucc_tl_ucp_dpu_offload_buf_info_t;
 
 typedef struct ucc_tl_ucp_task {
     ucc_coll_task_t super;
@@ -127,19 +130,12 @@ typedef struct ucc_tl_ucp_task {
             ucc_ee_executor_t      *executor;
         } allreduce_kn;
         struct {
-            int                                        reduce_in_progress;
-            ucp_rkey_h                                *src_rkeys; //unpacked
-            ucp_rkey_h                                *dst_rkeys; //unpacked
-            void                                     **sbufs;
-            void                                     **rbufs;
             ucc_tl_ucp_allreduce_sw_pipeline          *pipe;
-            ucc_ee_executor_task_t                    *etask;
-            ucc_ee_executor_t                         *executor;
             ucs_status_ptr_t                          *put_requests;
             ucc_tl_ucp_allreduce_sw_host_allgather    *allgather_data;
-            ucc_schedule_t                            *sw_sched;
-            struct ucc_tl_ucp_allreduce_sw_export_buf *src_ebuf;
-            struct ucc_tl_ucp_allreduce_sw_export_buf *dst_ebuf;
+            ucc_coll_task_t                           *allgather_task;
+            ucc_ee_executor_task_t                    *reduce_task;
+            ucc_tl_ucp_dpu_offload_buf_info_t         *bufs;
         } allreduce_sliding_window;
         struct {
             int                     phase;
@@ -148,6 +144,7 @@ typedef struct ucc_tl_ucp_task {
             ucc_mc_buffer_header_t *scratch_mc_header;
             ucc_ee_executor_task_t *etask;
             ucc_ee_executor_t      *executor;
+            size_t                  max_seg;
         } reduce_scatter_kn;
         struct {
             void                   *scratch;
@@ -181,7 +178,7 @@ typedef struct ucc_tl_ucp_task {
             int                     phase;
             ucc_knomial_pattern_t   p;
             void                   *sbuf;
-            ucc_ee_executor_task_t *etask;
+            ucc_tl_ucp_copy_task_t *copy_task;
             ucc_rank_t              recv_dist;
         } allgather_kn;
         struct {
@@ -202,9 +199,17 @@ typedef struct ucc_tl_ucp_task {
                                          int step);
         } allgather_ring;
         struct {
+            int                     nreqs; // number of send/recv requests in progress
+            ucc_tl_ucp_copy_task_t *copy_task;
+        } allgather_linear;
+        struct {
             ucc_mc_buffer_header_t *scratch_header;
             size_t                  scratch_size;
         } allgather_bruck;
+        struct {
+            uint32_t                i;
+            int                     data_expected;
+        } allgather_sparbit;
         struct {
             ucc_rank_t              dist;
             uint32_t                radix;
@@ -236,10 +241,11 @@ typedef struct ucc_tl_ucp_task {
             ucc_ee_executor_t      *executor;
         } reduce_dbt;
         struct {
+            int                     phase;
+            ucc_knomial_pattern_t   p;
             ucc_rank_t              dist;
             ucc_rank_t              max_dist;
             uint32_t                radix;
-            int                     phase;
             void *                  scratch;
             ucc_mc_buffer_header_t *scratch_mc_header;
         } gather_kn;
@@ -266,12 +272,16 @@ typedef struct ucc_tl_ucp_task {
             ucc_rank_t              iteration;
             int                     phase;
         } alltoall_bruck;
+        char                        plugin_data[UCC_TL_UCP_TASK_PLUGIN_MAX_DATA];
     };
 } ucc_tl_ucp_task_t;
 
 typedef struct ucc_tl_ucp_schedule {
     ucc_schedule_pipelined_t super;
     ucc_mc_buffer_header_t  *scratch_mc_header;
+    union {
+        ptrdiff_t frag_offset;
+    } reduce_srg_kn;
 } ucc_tl_ucp_schedule_t;
 
 #define TASK_TEAM(_task)                                                       \
@@ -318,17 +328,17 @@ static inline void ucc_tl_ucp_put_task(ucc_tl_ucp_task_t *task)
 }
 
 static inline ucc_status_t
-ucc_tl_ucp_get_schedule(ucc_tl_ucp_team_t      *team,
-                        ucc_base_coll_args_t   *args,
+ucc_tl_ucp_get_schedule(ucc_tl_ucp_team_t *team,
+                        ucc_base_coll_args_t *args,
                         ucc_tl_ucp_schedule_t **schedule)
 {
-    ucc_tl_ucp_context_t  *ctx      = UCC_TL_UCP_TEAM_CTX(team);
+    ucc_tl_ucp_context_t  *ctx = UCC_TL_UCP_TEAM_CTX(team);
 
     *schedule = ucc_mpool_get(&ctx->req_mp);
-
     if (ucc_unlikely(!(*schedule))) {
         return UCC_ERR_NO_MEMORY;
     }
+
     UCC_TL_UCP_PROFILE_REQUEST_NEW(schedule, "tl_ucp_sched", 0);
     return ucc_schedule_init(&((*schedule)->super.super), args,
                              &team->super.super);
@@ -339,7 +349,6 @@ static inline void ucc_tl_ucp_put_schedule(ucc_schedule_t *schedule)
     UCC_TL_UCP_PROFILE_REQUEST_FREE(schedule);
     ucc_mpool_put(schedule);
 }
-
 
 ucc_status_t ucc_tl_ucp_coll_init(ucc_base_coll_args_t *coll_args,
                                   ucc_base_team_t *     team,
@@ -360,7 +369,7 @@ ucc_tl_ucp_init_task(ucc_base_coll_args_t *coll_args, ucc_base_team_t *team)
     ucc_coll_task_init(&task->super, coll_args, team);
 
     if (UCC_COLL_ARGS_ACTIVE_SET(&coll_args->args)) {
-        task->tagged.tag = (coll_args->mask & UCC_COLL_ARGS_FIELD_TAG)
+        task->tagged.tag = (coll_args->args.mask & UCC_COLL_ARGS_FIELD_TAG)
             ? coll_args->args.tag : UCC_TL_UCP_ACTIVE_SET_TAG;
         task->flags        |= UCC_TL_UCP_TASK_FLAG_SUBSET;
         task->subset.map    = ucc_active_set_to_ep_map(&coll_args->args);
@@ -368,12 +377,8 @@ ucc_tl_ucp_init_task(ucc_base_coll_args_t *coll_args, ucc_base_team_t *team)
             ucc_ep_map_local_rank(task->subset.map,
                                   UCC_TL_TEAM_RANK(tl_team));
         ucc_assert(coll_args->args.coll_type == UCC_COLL_TYPE_BCAST);
-        /* root value in args corresponds to the  original team ranks,
-           need to convert to subset local value */
-        TASK_ARGS(task).root = ucc_ep_map_local_rank(task->subset.map,
-                                                     coll_args->args.root);
     } else {
-        if (coll_args->mask & UCC_COLL_ARGS_FIELD_TAG) {
+        if (coll_args->args.mask & UCC_COLL_ARGS_FIELD_TAG) {
             task->tagged.tag = coll_args->args.tag;
         } else {
             tl_team->seq_num = (tl_team->seq_num + 1) % UCC_TL_UCP_MAX_COLL_TAG;
@@ -510,4 +515,33 @@ ucc_tl_ucp_get_radix_from_range(ucc_tl_ucp_team_t *team,
     }
     return radix;
 }
+
+/*
+ * Get the radix for knomial patterns.
+ * If need_scratch is true, the radix is the minimum radix that can be used to fit into scratch buffer.
+ * Otherwise, the radix is the minimum radix that can be used to fit into team size.
+ */
+static inline unsigned ucc_tl_ucp_get_knomial_radix(ucc_tl_ucp_team_t *team,
+                                                    size_t             count,
+                                                    ucc_datatype_t     dtype,
+                                                    ucc_memory_type_t  mem_type,
+                                                    ucc_mrange_uint_t *p,
+                                                    int need_scratch)
+{
+    size_t msgsize = count * ucc_dt_size(dtype);
+    unsigned opt_radix, cfg_radix, radix;
+
+    opt_radix = (mem_type == UCC_MEMORY_TYPE_HOST) ? team->opt_radix_host :
+                                                    team->opt_radix;
+    cfg_radix = ucc_tl_ucp_get_radix_from_range(team, msgsize, mem_type, p,
+                                                opt_radix);
+    if (need_scratch) {
+        radix = ucc_knomial_pattern_get_min_radix(cfg_radix, UCC_TL_TEAM_SIZE(team), count);
+    } else {
+        radix = ucc_min(cfg_radix, UCC_TL_TEAM_SIZE(team));
+
+    }
+    return radix;
+}
+
 #endif

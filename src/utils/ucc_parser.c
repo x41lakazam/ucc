@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See file LICENSE for terms.
  */
@@ -49,6 +49,8 @@ static int ucc_check_section(ucc_section_desc_t sec_desc,
                              ucc_rank_t team_size,
                              ucc_rank_t ppn_min,
                              ucc_rank_t ppn_max,
+                             ucc_rank_t sock_min,
+                             ucc_rank_t sock_max,
                              ucc_rank_t nnodes)
 {
     if (sec_desc.mask & UCC_TUNING_DESC_FIELD_VENDOR) {
@@ -69,6 +71,11 @@ static int ucc_check_section(ucc_section_desc_t sec_desc,
     }
     if (sec_desc.mask & UCC_TUNING_DESC_FIELD_PPN) {
         if (ppn_min < sec_desc.min_ppn || ppn_max > sec_desc.max_ppn) {
+            return 0;
+        }
+    }
+    if (sec_desc.mask & UCC_TUNING_DESC_FIELD_SOCK) {
+        if (sock_min < sec_desc.min_sock || sock_max > sec_desc.max_sock) {
             return 0;
         }
     }
@@ -160,6 +167,13 @@ ucc_parse_section_name_to_desc(const char *sec_name, ucc_section_desc_t *desc)
             }
             desc->mask |= UCC_TUNING_DESC_FIELD_PPN;
         }
+        else if (strcmp(cur_str[0], "sock") == 0) {
+            if (!ucc_check_range(cur_str[1], &desc->min_sock,
+                                 &desc->max_sock)) {
+                goto err_key;
+            }
+            desc->mask |= UCC_TUNING_DESC_FIELD_SOCK;
+        }
         else if (strcmp(cur_str[0], "nnodes") == 0) {
             if (!ucc_check_range(cur_str[1], &desc->min_nnodes,
                                  &desc->max_nnodes)) {
@@ -224,6 +238,9 @@ ucc_status_t ucc_config_names_array_dup(ucc_config_names_array_t *dst,
 {
     int i;
 
+    if (dst->count != 0) {
+        ucc_config_names_array_free(dst);
+    }
     dst->names = ucc_malloc(sizeof(char*) * src->count, "ucc_config_names_array");
     if (!dst->names) {
         ucc_error("failed to allocate %zd bytes for ucc_config_names_array",
@@ -249,10 +266,13 @@ err:
 void ucc_config_names_array_free(ucc_config_names_array_t *array)
 {
     int i;
-    for (i = 0; i < array->count; i++) {
-        free(array->names[i]);
+    if (array->names != NULL) {
+        for (i = 0; i < array->count; i++) {
+            free(array->names[i]);
+        }
+        ucc_free(array->names);
     }
-    ucc_free(array->names);
+    array->count = 0;
 }
 
 int ucc_config_names_search(const ucc_config_names_array_t *config_names,
@@ -576,8 +596,11 @@ ucc_status_t ucc_add_team_sections(void                *team_cfg,
     ucc_cpu_model_t        model     = ucc_arch_get_cpu_model();
     ucc_rank_t             ppn_min   = ucc_topo_min_ppn(team_topo);
     ucc_rank_t             ppn_max   = ucc_topo_max_ppn(team_topo);
+    ucc_rank_t             sock_min  = ucc_topo_min_socket_size(team_topo);
+    ucc_rank_t             sock_max  = ucc_topo_max_socket_size(team_topo);
     ucc_rank_t             nnodes    = ucc_topo_nnodes(team_topo);
     ucc_rank_t             team_size = team_topo->set.map.ep_num;
+    int                    found     = 0;
     khash_t(ucc_sec)      *sec_h;
     khiter_t               i, j;
     const char            *sec_name;
@@ -589,7 +612,7 @@ ucc_status_t ucc_add_team_sections(void                *team_cfg,
         sec_name = kh_key(sections, i);
         sec      = kh_val(sections, i);
         if (ucc_check_section(sec->desc, vendor, model, team_size,
-                              ppn_min, ppn_max, nnodes)) {
+                              ppn_min, ppn_max, sock_min, sock_max, nnodes)) {
             sec_h = &sec->vals_h;
             j = kh_get(ucc_sec, sec_h, tune_key);
             if (j != kh_end(sec_h)) {
@@ -597,10 +620,10 @@ ucc_status_t ucc_add_team_sections(void                *team_cfg,
             }
             status = ucc_apply_file_cfg(team_cfg, tl_fields, env_prefix,
                                         component_prefix, sec_name);
-            return status;
+            found = 1;
         }
     }
-    return UCC_ERR_NOT_FOUND;
+    return found ? status : UCC_ERR_NOT_FOUND;
 }
 
 ucc_status_t ucc_config_parser_fill_opts(void *opts, ucs_config_global_list_entry_t *entry,
@@ -658,9 +681,8 @@ void ucc_config_parser_print_all_opts(FILE *stream, const char *prefix,
         }
 
         snprintf(title, sizeof(title), "%s configuration", entry->name);
-        ucs_config_parser_print_opts(stream, title, opts, entry->table,
+        UCS_CONFIG_PARSER_PRINT_OPTS(stream, title, opts, entry->table,
                                      entry->prefix, prefix, ucs_flags);
-
         ucs_config_parser_release_opts(opts, entry->table);
         ucc_free(opts);
     }
@@ -698,7 +720,15 @@ static ucc_pipeline_params_t ucc_pipeline_params_default = {
 
 int ucc_pipeline_params_is_auto(const ucc_pipeline_params_t *p)
 {
-    return 0 == memcmp(p, &ucc_pipeline_params_auto, sizeof(*p));
+    if ((p->threshold == ucc_pipeline_params_auto.threshold) &&
+        (p->n_frags == ucc_pipeline_params_auto.n_frags) &&
+        (p->frag_size == ucc_pipeline_params_auto.frag_size) &&
+        (p->pdepth == ucc_pipeline_params_auto.pdepth) &&
+        (p->order == ucc_pipeline_params_auto.order)) {
+        return 1;
+    }
+
+    return 0;
 }
 
 int ucc_config_sscanf_pipeline_params(const char *buf, void *dest,
@@ -894,25 +924,25 @@ err_ranges:
     return 0;
 }
 
+#define MAX_TMP_BUF_LENGTH 128
 int ucc_config_sprintf_uint_ranged(char *buf, size_t max, const void *src,
                                    const void *arg) // NOLINT
 {
     const ucc_mrange_uint_t *s       = src;
-    const size_t             tmp_max = 128;
     ucc_mrange_t            *r;
-    char                     tmp_start[tmp_max];
-    char                     tmp_end[tmp_max];
-    char                     tmp_mtypes[tmp_max];
+    char                     tmp_start[MAX_TMP_BUF_LENGTH];
+    char                     tmp_end[MAX_TMP_BUF_LENGTH];
+    char                     tmp_mtypes[MAX_TMP_BUF_LENGTH];
     size_t                   last;
 
     ucc_list_for_each(r, &s->ranges, list_elem) {
-        ucs_memunits_to_str(r->start, tmp_start, tmp_max);
-        ucs_memunits_to_str(r->end, tmp_end, tmp_max);
+        ucs_memunits_to_str(r->start, tmp_start, MAX_TMP_BUF_LENGTH);
+        ucs_memunits_to_str(r->end, tmp_end, MAX_TMP_BUF_LENGTH);
         if (r->mtypes == UCC_MEM_TYPE_MASK_FULL) {
             ucc_snprintf_safe(buf, max, "%s-%s:%u", tmp_start, tmp_end,
                               r->value);
         } else {
-            ucc_mtype_map_to_str(r->mtypes, "^", tmp_mtypes, tmp_max);
+            ucc_mtype_map_to_str(r->mtypes, "^", tmp_mtypes, MAX_TMP_BUF_LENGTH);
             ucc_snprintf_safe(buf, max, "%s-%s:%s:%u", tmp_start, tmp_end,
                               tmp_mtypes, r->value);
         }

@@ -97,6 +97,17 @@ ucc_coll_args_get_count(const ucc_coll_args_t *args, const ucc_count_t *counts,
     return ((uint32_t *)counts)[idx];
 }
 
+static inline void
+ucc_coll_args_set_count(const ucc_coll_args_t *args, const ucc_count_t *counts,
+                        ucc_rank_t idx, size_t val)
+{
+    if (UCC_COLL_ARGS_COUNT64(args)) {
+        ((uint64_t *)counts)[idx] = (uint64_t)val;
+    } else {
+        ((uint32_t *)counts)[idx] = (uint32_t)val;
+    }
+}
+
 static inline size_t ucc_coll_args_get_max_count(const ucc_coll_args_t *args,
                                                  const ucc_count_t *    counts,
                                                  ucc_rank_t             size)
@@ -123,6 +134,18 @@ ucc_coll_args_get_displacement(const ucc_coll_args_t *args,
     return ((uint32_t *)displacements)[idx];
 }
 
+static inline void
+ucc_coll_args_set_displacement(const ucc_coll_args_t *args,
+                               const ucc_aint_t *displacements, ucc_rank_t idx,
+                               size_t val)
+{
+    if (UCC_COLL_ARGS_DISPL64(args)) {
+        ((uint64_t *)displacements)[idx] = (uint64_t)val;
+    } else {
+        ((uint32_t *)displacements)[idx] = (uint32_t)val;
+    }
+}
+
 static inline size_t
 ucc_coll_args_get_total_count(const ucc_coll_args_t *args,
                               const ucc_count_t *counts, ucc_rank_t size)
@@ -143,6 +166,52 @@ ucc_coll_args_get_total_count(const ucc_coll_args_t *args,
 
     return count;
 }
+
+/* Check if the displacements are contig, whether or not the user passed
+   UCC_COLL_ARGS_FLAG_CONTIG_DST_BUFFER in coll args */
+static inline int ucc_coll_args_is_disp_contig(const ucc_coll_args_t *args,
+                                               ucc_rank_t size)
+{
+    size_t     count_accumulator = 0;
+    size_t     disps;
+    ucc_rank_t i;
+
+    if (!UCC_COLL_IS_DST_CONTIG(args)) {
+        for (i = 0; i < size; i++) {
+            disps = ucc_coll_args_get_displacement(
+                        args, args->dst.info_v.displacements, i);
+            if (disps != count_accumulator) {
+                return 0;
+            }
+            count_accumulator += ucc_coll_args_get_count(
+                                    args, args->dst.info_v.counts, i);
+        }
+    }
+
+    return 1;
+}
+
+static inline size_t
+ucc_coll_args_get_v_buffer_size(const ucc_coll_args_t *args,
+                                const ucc_count_t *counts,
+                                const ucc_aint_t *displacements,
+                                ucc_rank_t size)
+{
+    ucc_rank_t i;
+    size_t max_disp, idx_count;
+
+    max_disp = ucc_coll_args_get_displacement(args, displacements, 0);
+    idx_count = ucc_coll_args_get_count(args, counts, 0);
+    for (i = 1; i < size; i++) {
+        size_t disp_i = ucc_coll_args_get_displacement(args, displacements, i);
+        if (disp_i > max_disp) {
+            max_disp = disp_i;
+            idx_count = ucc_coll_args_get_count(args, counts, i);
+        }
+    }
+
+    return max_disp + idx_count;
+}
 typedef struct ucc_base_coll_args ucc_base_coll_args_t;
 
 ucc_coll_type_t   ucc_coll_type_from_str(const char *str);
@@ -155,7 +224,7 @@ size_t            ucc_coll_args_msgsize(const ucc_coll_args_t *args,
 ucc_memory_type_t ucc_coll_args_mem_type(const ucc_coll_args_t *args,
                                          ucc_rank_t rank);
 
-
+/* Convert rank from subset space to rank space (UCC team space) */
 static inline ucc_rank_t ucc_ep_map_eval(ucc_ep_map_t map, ucc_rank_t rank)
 {
     ucc_rank_t r;
@@ -205,6 +274,9 @@ ucc_ep_map_t ucc_ep_map_from_array_64(uint64_t **array, ucc_rank_t size,
 typedef struct ucc_coll_task ucc_coll_task_t;
 void ucc_coll_str(const ucc_coll_task_t *task, char *str, size_t len,
                   int verbosity);
+
+void ucc_coll_args_str(const ucc_coll_args_t *args, ucc_rank_t trank,
+                       ucc_rank_t tsize, char *str, size_t len);
 
 /* Creates a rank map that reverses rank order, ie
    rank r -> size - 1 - r */
@@ -259,10 +331,30 @@ static inline size_t ucc_buffer_block_offset(size_t     total_count,
     return (block < left) ? offset - (left - block) : offset;
 }
 
+static inline size_t ucc_buffer_vector_block_offset(ucc_count_t *counts,
+                                                    int is64,
+                                                    ucc_rank_t rank)
+{
+    size_t offset = 0;
+    ucc_rank_t i;
+
+    if (is64) {
+        for (i = 0; i < rank; i++) {
+            offset += ((uint64_t *)counts)[i];
+        }
+    } else {
+        for (i = 0; i < rank; i++) {
+            offset += ((uint32_t *)counts)[i];
+        }
+    }
+    return offset;
+}
+
 /* Given the rank space A (e.g. core ucc team), a subset B (e.g. active set
    within the core team), the ep_map that maps ranks from the subset B to A,
-   and the rank of a process within A.
-   The function below computes the local rank of the process within subset B. */
+   and the rank of a process within A. The function below computes the local
+   rank of the process within subset B.
+   i.e., convert from rank space (UCC team) to subset space */
 static inline ucc_rank_t ucc_ep_map_local_rank(ucc_ep_map_t map,
                                                ucc_rank_t   rank)
 {
@@ -333,5 +425,22 @@ static inline size_t ucc_buffer_block_offset_aligned(size_t total_count,
    @param [in] rank        rank to check, used only for rooted collective
                            operations. */
 int ucc_coll_args_is_predefined_dt(const ucc_coll_args_t *args, ucc_rank_t rank);
+
+int ucc_coll_args_is_mem_symmetric(const ucc_coll_args_t *args, ucc_rank_t rank);
+
+int ucc_coll_args_is_rooted(ucc_coll_type_t ct);
+
+typedef struct ucc_buffer_info_asymmetric_memtype ucc_buffer_info_asymmetric_memtype_t;
+typedef struct ucc_mc_buffer_header ucc_mc_buffer_header_t;
+
+ucc_status_t
+ucc_coll_args_init_asymmetric_buffer(ucc_coll_args_t *args,
+                                       ucc_team_h team,
+                                       ucc_buffer_info_asymmetric_memtype_t *save_info);
+
+ucc_status_t
+ucc_coll_args_free_asymmetric_buffer(ucc_coll_task_t *task);
+
+ucc_status_t ucc_copy_asymmetric_buffer(ucc_coll_task_t *task);
 
 #endif

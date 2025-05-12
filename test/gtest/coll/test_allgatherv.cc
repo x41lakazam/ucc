@@ -1,13 +1,17 @@
 /**
- * Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ *
  * See file LICENSE for terms.
  */
 
 #include "common/test_ucc.h"
 #include "utils/ucc_math.h"
 
-using Param_0 = std::tuple<int, ucc_datatype_t, ucc_memory_type_t, int, gtest_ucc_inplace_t>;
-using Param_1 = std::tuple<ucc_datatype_t, ucc_memory_type_t, int, gtest_ucc_inplace_t>;
+using Param_0 = std::tuple<int, ucc_datatype_t, ucc_memory_type_t, int, gtest_ucc_inplace_t, bool>;
+using Param_1 = std::tuple<ucc_datatype_t, ucc_memory_type_t, int, gtest_ucc_inplace_t, bool>;
+using Param_2 = std::tuple<ucc_datatype_t, ucc_memory_type_t, int, gtest_ucc_inplace_t, std::string, bool>;
+
+size_t noncontig_padding = 1; // # elements worth of space in between each rank's contribution to the dst buf
 
 class test_allgatherv : public UccCollArgs, public ucc::test
 {
@@ -19,7 +23,7 @@ public:
             int *counts;
             int *displs;
             size_t my_count = (nprocs - r) * count;
-            size_t all_counts = 0;
+            size_t disp_counter = 0;
             ucc_coll_args_t *coll = (ucc_coll_args_t*)calloc(1, sizeof(ucc_coll_args_t));
 
             ctxs[r] = (gtest_ucc_coll_ctx_t*)calloc(1, sizeof(gtest_ucc_coll_ctx_t));
@@ -28,12 +32,21 @@ public:
             counts = (int*)malloc(sizeof(int) * nprocs);
             displs = (int*)malloc(sizeof(int) * nprocs);
 
-            for (int i = 0; i < nprocs; i++) {
-                counts[i] = (nprocs - i) * count;
-                displs[i] = all_counts;
-                all_counts += counts[i];
+            if (is_contig) {
+                for (int i = 0; i < nprocs; i++) {
+                    counts[i] = (nprocs - i) * count;
+                    displs[i] = disp_counter;
+                    disp_counter += counts[i];
+                }
+                coll->flags = UCC_COLL_ARGS_FLAG_CONTIG_DST_BUFFER;
+            } else {
+                for (int i = 0; i < nprocs; i++) {
+                    counts[i] = (nprocs - i) * count;
+                    displs[i] = disp_counter;
+                    disp_counter += counts[i] + noncontig_padding; // Add noncontig_padding elemnts of space between the bufs
+                }
             }
-            coll->mask = 0;
+            coll->mask = UCC_COLL_ARGS_FIELD_FLAGS;
             coll->coll_type = UCC_COLL_TYPE_ALLGATHERV;
 
             coll->src.info.mem_type = mem_type;
@@ -52,7 +65,7 @@ public:
                 sbuf[i] = r;
             }
 
-            ctxs[r]->rbuf_size = ucc_dt_size(dtype) * all_counts;
+            ctxs[r]->rbuf_size = ucc_dt_size(dtype) * disp_counter;
             UCC_CHECK(ucc_mc_alloc(&ctxs[r]->dst_mc_header, ctxs[r]->rbuf_size,
                                    mem_type));
             coll->dst.info_v.buffer = ctxs[r]->dst_mc_header->addr;
@@ -135,6 +148,7 @@ public:
         for (int i = 0; i < ctxs.size(); i++) {
             size_t rank_size = 0;
             uint8_t *rbuf = dsts[i];
+            int is_contig = UCC_COLL_IS_DST_CONTIG(ctxs[i]->args);
             for (int r = 0; r < ctxs.size(); r++) {
                 rbuf += rank_size;
                 rank_size = ucc_dt_size((ctxs[r])->args->src.info.datatype) *
@@ -144,6 +158,9 @@ public:
                         ret = false;
                         break;
                     }
+                }
+                if (!is_contig) {
+                    rbuf += noncontig_padding * ucc_dt_size((ctxs[r])->args->src.info.datatype);
                 }
             }
         }
@@ -166,11 +183,13 @@ UCC_TEST_P(test_allgatherv_0, single)
     const ucc_memory_type_t   mem_type = std::get<2>(GetParam());
     const int                 count    = std::get<3>(GetParam());
     const gtest_ucc_inplace_t inplace  = std::get<4>(GetParam());
+    const bool                contig   = std::get<5>(GetParam());
     UccTeam_h                 team     = UccJob::getStaticTeams()[team_id];
     int                       size     = team->procs.size();
     UccCollCtxVec             ctxs;
 
     set_inplace(inplace);
+    set_contig(contig);
     SET_MEM_TYPE(mem_type);
 
     data_init(size, dtype, count, ctxs, false);
@@ -188,12 +207,14 @@ UCC_TEST_P(test_allgatherv_0, single_persistent)
     const ucc_memory_type_t   mem_type = std::get<2>(GetParam());
     const int                 count    = std::get<3>(GetParam());
     const gtest_ucc_inplace_t inplace  = std::get<4>(GetParam());
+    const bool                contig   = std::get<5>(GetParam());
     UccTeam_h                 team     = UccJob::getStaticTeams()[team_id];
     int                       size     = team->procs.size();
     const int                 n_calls  = 3;
     UccCollCtxVec             ctxs;
 
     set_inplace(inplace);
+    set_contig(contig);
     SET_MEM_TYPE(mem_type);
 
     data_init(size, dtype, count, ctxs, true);
@@ -220,7 +241,9 @@ INSTANTIATE_TEST_CASE_P(
         ::testing::Values(UCC_MEMORY_TYPE_HOST),
 #endif
         ::testing::Values(1,3,8192), // count
-        ::testing::Values(TEST_INPLACE, TEST_NO_INPLACE)));  // inplace
+        ::testing::Values(TEST_INPLACE, TEST_NO_INPLACE), // inplace
+        ::testing::Bool() // contig dst buf displacements
+        )); 
 
 class test_allgatherv_1 : public test_allgatherv,
         public ::testing::WithParamInterface<Param_1> {};
@@ -231,6 +254,7 @@ UCC_TEST_P(test_allgatherv_1, multiple)
     const ucc_memory_type_t    mem_type = std::get<1>(GetParam());
     const int                  count    = std::get<2>(GetParam());
     const gtest_ucc_inplace_t  inplace  = std::get<3>(GetParam());
+    const bool                 contig   = std::get<4>(GetParam());
     std::vector<UccReq>        reqs;
     std::vector<UccCollCtxVec> ctxs;
 
@@ -240,6 +264,7 @@ UCC_TEST_P(test_allgatherv_1, multiple)
         UccCollCtxVec   ctx;
 
         this->set_inplace(inplace);
+        this->set_contig(contig);
         SET_MEM_TYPE(mem_type);
 
         data_init(size, dtype, count, ctx, false);
@@ -250,7 +275,7 @@ UCC_TEST_P(test_allgatherv_1, multiple)
     UccReq::waitall(reqs);
 
     for (auto ctx : ctxs) {
-        EXPECT_EQ(true, data_validate(ctx));;
+        EXPECT_EQ(true, data_validate(ctx));
         data_fini(ctx);
     }
 }
@@ -266,4 +291,64 @@ INSTANTIATE_TEST_CASE_P(
         ::testing::Values(UCC_MEMORY_TYPE_HOST),
 #endif
         ::testing::Values(1,3,8192), // count
-        ::testing::Values(TEST_INPLACE, TEST_NO_INPLACE)));
+        ::testing::Values(TEST_INPLACE, TEST_NO_INPLACE),
+        ::testing::Bool()) // dst buf contig
+    );
+
+class test_allgatherv_alg : public test_allgatherv,
+        public ::testing::WithParamInterface<Param_2> {};
+
+UCC_TEST_P(test_allgatherv_alg, alg)
+{
+    const ucc_datatype_t      dtype    = std::get<0>(GetParam());
+    const ucc_memory_type_t   mem_type = std::get<1>(GetParam());
+    const int                 count    = std::get<2>(GetParam());
+    const gtest_ucc_inplace_t inplace  = std::get<3>(GetParam());
+    const bool                contig   = std::get<5>(GetParam());
+    int                       n_procs  = 5;
+    char                      tune[32];
+
+    sprintf(tune, "allgatherv:@%s:inf", std::get<4>(GetParam()).c_str());
+    ucc_job_env_t env     = {{"UCC_CL_BASIC_TUNE", "inf"},
+                             {"UCC_TL_UCP_TUNE", tune}};
+    UccJob        job(n_procs, UccJob::UCC_JOB_CTX_GLOBAL, env);
+    UccTeam_h     team    = job.create_team(n_procs);
+    UccCollCtxVec ctxs;
+
+    set_inplace(inplace);
+    set_contig(contig);
+    SET_MEM_TYPE(mem_type);
+
+    data_init(n_procs, dtype, count, ctxs, false);
+    UccReq    req(team, ctxs);
+    req.start();
+    req.wait();
+    EXPECT_EQ(true, data_validate(ctxs));
+    data_fini(ctxs);
+}
+
+INSTANTIATE_TEST_CASE_P(
+    , test_allgatherv_alg,
+    ::testing::Combine(
+        PREDEFINED_DTYPES,
+#ifdef HAVE_CUDA
+        ::testing::Values(UCC_MEMORY_TYPE_HOST, UCC_MEMORY_TYPE_CUDA,
+                          UCC_MEMORY_TYPE_CUDA_MANAGED),
+#else
+        ::testing::Values(UCC_MEMORY_TYPE_HOST),
+#endif
+        ::testing::Values(1,3,8192), // count
+        ::testing::Values(TEST_INPLACE, TEST_NO_INPLACE),
+        ::testing::Values("knomial", "ring"),
+        ::testing::Bool()), // dst buf contig
+        [](const testing::TestParamInfo<test_allgatherv_alg::ParamType>& info) {
+            std::string name;
+            name += ucc_datatype_str(std::get<0>(info.param));
+            name += std::string("_") + std::string(ucc_mem_type_str(std::get<1>(info.param)));
+            name += std::string("_count_")+std::to_string(std::get<2>(info.param));
+            name += std::string("_inplace_")+std::to_string(std::get<3>(info.param));
+            name += std::string("_contig_")+std::to_string(std::get<5>(info.param));
+            name += std::string("_")+std::get<4>(info.param);
+            return name;
+        }
+    );

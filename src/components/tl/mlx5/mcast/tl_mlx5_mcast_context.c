@@ -53,7 +53,13 @@ ucc_status_t ucc_tl_mlx5_mcast_context_init(ucc_tl_mlx5_mcast_context_t    *cont
     mlx5_ctx = ucc_container_of(context, ucc_tl_mlx5_context_t, mcast);
     lib      = mlx5_ctx->super.super.lib;
 
-    context->mcast_enabled = mcast_ctx_conf->mcast_enabled;
+    context->mcast_enabled           = mcast_ctx_conf->mcast_enabled;
+    context->mcast_bcast_enabled     = mcast_ctx_conf->mcast_bcast_enabled;
+    context->mcast_allgather_enabled = mcast_ctx_conf->mcast_allgather_enabled;
+    if (context->mcast_bcast_enabled && context->mcast_allgather_enabled) {
+        /* only a single colletive type is supported at a time */
+        context->mcast_allgather_enabled = 0;
+    }
 
     if (!mcast_ctx_conf->mcast_enabled) {
         tl_debug(lib, "Mcast is disabled by the user");
@@ -216,7 +222,8 @@ ucc_status_t ucc_tl_mlx5_mcast_context_init(ucc_tl_mlx5_mcast_context_t    *cont
         }
     }
 
-    ctx->mtu = active_mtu;
+    ctx->mtu      = active_mtu;
+    ctx->port_lid = port_attr.lid;
 
     tl_debug(ctx->lib, "port active MTU is %d and port max MTU is %d",
              active_mtu, max_mtu);
@@ -237,6 +244,7 @@ ucc_status_t ucc_tl_mlx5_mcast_context_init(ucc_tl_mlx5_mcast_context_t    *cont
              device_attr.max_cq, device_attr.max_cqe);
 
     ctx->max_qp_wr = device_attr.max_qp_wr;
+
     status = ucc_mpool_init(&ctx->compl_objects_mp, 0, sizeof(ucc_tl_mlx5_mcast_p2p_completion_obj_t), 0,
                             UCC_CACHE_LINE_SIZE, 8, UINT_MAX,
                             &ucc_coll_task_mpool_ops,
@@ -244,6 +252,17 @@ ucc_status_t ucc_tl_mlx5_mcast_context_init(ucc_tl_mlx5_mcast_context_t    *cont
                             "ucc_tl_mlx5_mcast_p2p_completion_obj_t");
     if (ucc_unlikely(UCC_OK != status)) {
         tl_warn(lib, "failed to initialize compl_objects_mp mpool");
+        status = UCC_ERR_NO_MEMORY;
+        goto error;
+    }
+
+    status = ucc_mpool_init(&ctx->mcast_req_mp, 0, sizeof(ucc_tl_mlx5_mcast_coll_req_t), 0,
+                            UCC_CACHE_LINE_SIZE, 8, UINT_MAX,
+                            &ucc_coll_task_mpool_ops,
+                            UCC_THREAD_SINGLE,
+                            "ucc_tl_mlx5_mcast_coll_req_t");
+    if (ucc_unlikely(UCC_OK != status)) {
+        tl_warn(lib, "failed to initialize mcast_req_mp mpool");
         status = UCC_ERR_NO_MEMORY;
         goto error;
     }

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2020-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See file LICENSE for terms.
  */
@@ -27,6 +27,16 @@
 #define ucc_likely        ucs_likely
 #define ucc_unlikely      ucs_unlikely
 #define ucc_string_split  ucs_string_split
+
+/*
+ * Assertions which are checked in compile-time
+ * In case of failure a compiler msg looks like this:
+ * error: duplicate case value switch(0) {case 0:case (_cond):;}
+ *
+ * Usage: UCC_STATIC_ASSERT(condition)
+ */
+#define UCC_STATIC_ASSERT(_cond)                                               \
+     switch(0) {case 0:case (_cond):;}
 
 /**
  * Prevent compiler from reordering instructions
@@ -113,5 +123,22 @@ static inline ucs_status_t ucc_status_to_ucs_status(ucc_status_t status)
             goto _label;                                                       \
         }                                                                      \
     } while (0)
+
+
+#if defined(__clang__)
+    #define ucc_assume(x) __builtin_assume(x)
+#elif defined(__NVCOMPILER)
+    #define ucc_assume(x) __builtin_assume(x)
+#elif defined(__GNUC__)
+    #if (__GNUC__ >= 13)
+        /* GCC 13+ has __attribute__((assume)) */
+        #define ucc_assume(x) __attribute__((assume(x)))
+    #else
+        /* For older GCC versions, we can use __builtin_unreachable() as a fallback */
+        #define ucc_assume(x) ((x) ? (void)0 : __builtin_unreachable())
+    #endif
+#else
+    #define ucc_assume(x) do {} while (0)  /* No-op for unsupported compilers */
+#endif    
 
 #endif

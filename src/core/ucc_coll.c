@@ -205,9 +205,8 @@ UCC_CORE_PROFILE_FUNC(ucc_status_t, ucc_collective_init,
     }
 
     if (UCC_COLL_ARGS_ACTIVE_SET(coll_args) &&
-        ((UCC_COLL_TYPE_BCAST != coll_args->coll_type) ||
-         coll_args->active_set.size != 2)) {
-        ucc_warn("Active Sets are only supported for bcast and set size = 2");
+        (UCC_COLL_TYPE_BCAST != coll_args->coll_type)) {
+        ucc_warn("Active Sets are only supported for bcast");
         return UCC_ERR_NOT_SUPPORTED;
     }
 
@@ -231,19 +230,35 @@ UCC_CORE_PROFILE_FUNC(ucc_status_t, ucc_collective_init,
     UCC_COPY_PARAM_BY_FIELD(&op_args.args, coll_args, UCC_COLL_ARGS_FIELD_FLAGS,
                             flags);
 
+    if (!ucc_coll_args_is_mem_symmetric(&op_args.args, team->rank) &&
+        ucc_coll_args_is_rooted(op_args.args.coll_type)) {
+        status = ucc_coll_args_init_asymmetric_buffer(&op_args.args, team,
+                    &op_args.asymmetric_save_info);
+        if (ucc_unlikely(status != UCC_OK)) {
+            ucc_error("handling asymmetric memory failed");
+            return status;
+        }
+    } else {
+        op_args.asymmetric_save_info.scratch = NULL;
+    }
+
     status = ucc_coll_init(team->score_map, &op_args, &task);
     if (UCC_ERR_NOT_SUPPORTED == status) {
         ucc_debug("failed to init collective: not supported");
-        return status;
+        goto free_scratch;
     } else if (ucc_unlikely(status < 0)) {
-        ucc_error("failed to init collective: %s", ucc_status_string(status));
-        return status;
+        char coll_args_str[256] = {0};
+        ucc_coll_args_str(&op_args.args, team->rank, team->size, coll_args_str,
+                          sizeof(coll_args_str));
+        ucc_error("failed to init collective: %s, err: (%d) %s", coll_args_str,
+                  status, ucc_status_string(status));
+        goto free_scratch;
     }
 
     task->flags |= UCC_COLL_TASK_FLAG_TOP_LEVEL;
     if (task->flags & UCC_COLL_TASK_FLAG_EXECUTOR) {
         task->flags |= UCC_COLL_TASK_FLAG_EXECUTOR_STOP;
-        coll_mem_type = ucc_coll_args_mem_type(coll_args, team->rank);
+        coll_mem_type = ucc_coll_args_mem_type(&op_args.args, team->rank);
         switch(coll_mem_type) {
         case UCC_MEMORY_TYPE_CUDA:
         case UCC_MEMORY_TYPE_CUDA_MANAGED:
@@ -252,7 +267,7 @@ UCC_CORE_PROFILE_FUNC(ucc_status_t, ucc_collective_init,
         case UCC_MEMORY_TYPE_ROCM:
             coll_ee_type = UCC_EE_ROCM_STREAM;
             break;
-       case UCC_MEMORY_TYPE_HOST:
+        case UCC_MEMORY_TYPE_HOST:
             coll_ee_type = UCC_EE_CPU_THREAD;
             break;
         default:
@@ -300,6 +315,10 @@ print_trace:
 
 coll_finalize:
     task->finalize(task);
+free_scratch:
+    if (op_args.asymmetric_save_info.scratch != NULL) {
+        ucc_mc_free(op_args.asymmetric_save_info.scratch);
+    }
     return status;
 }
 
@@ -327,21 +346,29 @@ UCC_CORE_PROFILE_FUNC(ucc_status_t, ucc_collective_post, (request),
     ucc_status_t status;
 
     if (ucc_global_config.coll_trace.log_level >= UCC_LOG_LEVEL_DEBUG) {
-        /* team is NULL if task is a dummy task, e.g. collective of zero size */
-        if (task->team) {
-            ucc_rank_t rank = task->team->params.team->rank;
-            if (ucc_global_config.coll_trace.log_level == UCC_LOG_LEVEL_DEBUG) {
-                if (rank == 0) {
-                    ucc_log_component_collective_trace(
-                        ucc_global_config.coll_trace.log_level,
-                        "coll post: req %p, seq_num %u", task, task->seq_num);
-                }
-            } else {
+        ucc_rank_t rank = task->bargs.team->rank;
+        if (ucc_global_config.coll_trace.log_level == UCC_LOG_LEVEL_DEBUG) {
+            if (rank == 0) {
                 ucc_log_component_collective_trace(
                     ucc_global_config.coll_trace.log_level,
-                    "coll post: rank %d req %p, seq_num %u", rank, task,
-                    task->seq_num);
+                    "coll post: req %p, seq_num %u", task, task->seq_num);
             }
+        } else {
+            ucc_log_component_collective_trace(
+                ucc_global_config.coll_trace.log_level,
+                "coll post: rank %d req %p, seq_num %u", rank, task,
+                task->seq_num);
+        }
+    }
+
+    if (task->bargs.asymmetric_save_info.scratch != NULL &&
+        (task->bargs.args.coll_type == UCC_COLL_TYPE_SCATTER ||
+         task->bargs.args.coll_type == UCC_COLL_TYPE_SCATTERV)) {
+        status = ucc_copy_asymmetric_buffer(task);
+        if (status != UCC_OK) {
+            ucc_error("failure copying in asymmetric buffer: %s",
+                        ucc_status_string(status));
+            return status;
         }
     }
 
@@ -365,7 +392,7 @@ ucc_status_t ucc_collective_triggered_post(ucc_ee_h ee, ucc_ev_t *ev)
     ucc_coll_task_t *task = ucc_derived_of(ev->req, ucc_coll_task_t);
 
     if (ucc_global_config.coll_trace.log_level >= UCC_LOG_LEVEL_DEBUG) {
-        ucc_rank_t rank = task->team->params.team->rank;
+        ucc_rank_t rank = task->bargs.team->rank;
         if (ucc_global_config.coll_trace.log_level == UCC_LOG_LEVEL_DEBUG) {
             if (rank == 0) {
                 ucc_log_component_collective_trace(
@@ -404,6 +431,13 @@ ucc_status_t ucc_collective_finalize_internal(ucc_coll_task_t *task)
     if (ucc_unlikely(task->super.status == UCC_INPROGRESS)) {
         ucc_error("attempt to finalize task with status UCC_INPROGRESS");
         return UCC_ERR_INVALID_PARAM;
+    }
+
+    if (task->bargs.asymmetric_save_info.scratch) {
+        st = ucc_coll_args_free_asymmetric_buffer(task);
+        if (ucc_unlikely(st != UCC_OK)) {
+            ucc_error("error freeing asymmetric buf: %s", ucc_status_string(st));
+        }
     }
 
     if (task->executor) {
@@ -588,5 +622,5 @@ ucc_status_t ucc_triggered_post(ucc_ee_h ee, ucc_ev_t *ev,
         return status;
     }
 
-    return ucc_progress_queue_enqueue(UCC_TASK_CORE_CTX(ev_task)->pq, ev_task);
+    return ucc_progress_queue_enqueue(task->bargs.team->contexts[0]->pq, ev_task);
 }
