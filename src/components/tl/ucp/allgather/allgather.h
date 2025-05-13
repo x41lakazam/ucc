@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See file LICENSE for terms.
  */
@@ -13,6 +13,7 @@ enum {
     UCC_TL_UCP_ALLGATHER_ALG_RING,
     UCC_TL_UCP_ALLGATHER_ALG_NEIGHBOR,
     UCC_TL_UCP_ALLGATHER_ALG_BRUCK,
+    UCC_TL_UCP_ALLGATHER_ALG_SPARBIT,
     UCC_TL_UCP_ALLGATHER_ALG_LAST
 };
 
@@ -21,6 +22,12 @@ extern ucc_base_coll_alg_info_t
 
 #define UCC_TL_UCP_ALLGATHER_DEFAULT_ALG_SELECT_STR                            \
     "allgather:0-4k:@0#allgather:4k-inf:@%d"
+
+#define UCC_TL_UCP_ALLGATHER_DEFAULT_ALG_SELECT_STR_1PPN                       \
+    "allgather:0-4k:@0#allgather:4k-inf:%s:@0#allgather:4k-inf:%s:@%d"
+
+#define UCC_TL_UCP_ALLGATHER_DEFAULT_ALG_SELECT_STR_1PPN_CUDA                  \
+    "allgather:0-4k:@0#allgather:4k-inf:%s:@0#allgather:4k-inf:@%d"
 
 char *ucc_tl_ucp_allgather_score_str_get(ucc_tl_ucp_team_t *team);
 
@@ -67,6 +74,11 @@ void ucc_tl_ucp_allgather_bruck_progress(ucc_coll_task_t *task);
 ucc_status_t ucc_tl_ucp_allgather_bruck_start(ucc_coll_task_t *task);
 
 ucc_status_t ucc_tl_ucp_allgather_bruck_finalize(ucc_coll_task_t *coll_task);
+
+/* Sparbit */
+ucc_status_t ucc_tl_ucp_allgather_sparbit_init(ucc_base_coll_args_t *coll_args,
+                                                ucc_base_team_t      *team,
+                                                ucc_coll_task_t     **task_h);
 
 /* Uses allgather_kn_radix from config */
 ucc_status_t ucc_tl_ucp_allgather_knomial_init(ucc_base_coll_args_t *coll_args,

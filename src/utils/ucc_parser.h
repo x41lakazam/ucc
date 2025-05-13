@@ -51,6 +51,14 @@ typedef struct ucc_file_config ucc_file_config_t;
     };
 #endif
 
+#ifdef UCS_HAVE_PARSER_PRINT_FILTER_ARG
+#define UCS_CONFIG_PARSER_PRINT_OPTS(_stream, _title, _opts, _fields, _tprefix, _prefix, _flags) \
+    ucs_config_parser_print_opts((_stream), (_title), (_opts), (_fields), (_tprefix), (_prefix), (_flags), NULL)
+#else
+#define UCS_CONFIG_PARSER_PRINT_OPTS(_stream, _title, _opts, _fields, _tprefix, _prefix, _flags) \
+    ucs_config_parser_print_opts((_stream), (_title), (_opts), (_fields), (_tprefix), (_prefix), (_flags))
+#endif
+
 #define UCC_CONFIG_GET_TABLE(_table)    &_table##_config_entry
 #define UCC_CONFIG_TYPE_LOG_COMP        UCS_CONFIG_TYPE_LOG_COMP
 #define UCC_CONFIG_REGISTER_TABLE       UCS_CONFIG_REGISTER_TABLE
@@ -97,7 +105,8 @@ enum tuning_mask {
     UCC_TUNING_DESC_FIELD_MODEL     = UCC_BIT(1),
     UCC_TUNING_DESC_FIELD_TEAM_SIZE = UCC_BIT(2),
     UCC_TUNING_DESC_FIELD_PPN       = UCC_BIT(3),
-    UCC_TUNING_DESC_FIELD_NNODES    = UCC_BIT(4)
+    UCC_TUNING_DESC_FIELD_NNODES    = UCC_BIT(4),
+    UCC_TUNING_DESC_FIELD_SOCK      = UCC_BIT(5)
 };
 
 typedef struct ucc_section_desc {
@@ -108,6 +117,8 @@ typedef struct ucc_section_desc {
     ucc_rank_t       max_team_size;
     ucc_rank_t       min_ppn;
     ucc_rank_t       max_ppn;
+    ucc_rank_t       min_sock;
+    ucc_rank_t       max_sock;
     ucc_rank_t       min_nnodes;
     ucc_rank_t       max_nnodes;
 } ucc_section_desc_t;
@@ -208,7 +219,7 @@ static inline void ucc_config_parser_print_opts(FILE *stream, const char *title,
     ucs_config_print_flags_t ucs_flags;
 
     ucs_flags = ucc_print_flags_to_ucs_print_flags(flags);
-    ucs_config_parser_print_opts(stream, title, opts, fields, table_prefix,
+    UCS_CONFIG_PARSER_PRINT_OPTS(stream, title, opts, fields, table_prefix,
                                  prefix, ucs_flags);
 }
 
