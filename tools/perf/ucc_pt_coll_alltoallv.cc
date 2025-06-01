@@ -58,6 +58,9 @@ double parse_transfer_matrix_token(std::string token)
     {
         switch(token[size])
         {
+            case 'K':
+                val *= 1e3;
+                break;
             case 'M':
                 val *= 1e6;
                 break;
