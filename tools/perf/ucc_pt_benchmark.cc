@@ -160,6 +160,7 @@ ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
     ucc_ee_h ee;
     ucc_ev_t comp_ev, *post_ev;
     double inner_time, max_inner_time;
+    std::string inner_log_file_name;
     std::ofstream inner_log_file;
 
     // Temporary
@@ -189,7 +190,8 @@ ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
     args.root = config.root % comm->get_size();
 
     if (std::getenv("UCC_PT_COLL_INNER_LOG_FILE")){
-        inner_log_file.open(std::getenv("UCC_PT_COLL_INNER_LOG_FILE"));
+        inner_log_file_name = std::string(std::getenv("UCC_PT_COLL_INNER_LOG_FILE")) + "." + std::to_string(comm->get_rank());
+        inner_log_file.open(inner_log_file_name);
         if (!inner_log_file.is_open()){
             std::cerr << "Couldn't open inner log file." << std::endl;
             std::terminate();
@@ -234,8 +236,7 @@ ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
             if (i >= nwarmup) {
                 time += inner_time;
                 if (inner_log_file.is_open()){
-                    comm->allreduce(&inner_time, &max_inner_time, 1, UCC_OP_MAX);
-                    inner_log_file << std::to_string(max_inner_time) << " ";
+                    inner_log_file << std::to_string(inner_time) << " ";
                 }
             }
         }
@@ -250,7 +251,6 @@ ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
         args.root = (args.root + config.root_shift) % comm->get_size();
         UCCCHECK_GOTO(comm->barrier(), exit_err, st);
     }
-    inner_log_file.close();
 
     if (persistent) {
         ucc_collective_finalize(req);
@@ -263,6 +263,7 @@ ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
 free_req:
     ucc_collective_finalize(req);
 exit_err:
+    inner_log_file.close();
     return st;
 }
 
