@@ -159,7 +159,7 @@ ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
     ucc_coll_req_h req;
     ucc_ee_h ee;
     ucc_ev_t comp_ev, *post_ev;
-    double inner_time, max_inner_time;
+    double inner_time;
     std::string inner_log_file_name;
     std::ofstream inner_log_file;
 
