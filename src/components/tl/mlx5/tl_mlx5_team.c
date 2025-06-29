@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See file LICENSE for terms.
  */
@@ -69,19 +69,24 @@ UCC_CLASS_INIT_FUNC(ucc_tl_mlx5_team_t, ucc_base_context_t *tl_context,
     self->global_sync_req = NULL;
 
     self->a2a = NULL;
-    status    = ucc_tl_mlx5_team_init_alltoall(self);
-    if (UCC_OK != status) {
-        return status;
+    if (ctx->cfg.enable_alltoall) {
+        status = ucc_tl_mlx5_team_init_alltoall(self);
+        if (UCC_OK != status) {
+            return status;
+        }
     }
 
     self->mcast = NULL;
-    status      = ucc_tl_mlx5_mcast_team_init(tl_context, &(self->mcast), &(ctx->mcast),
-                                              params, &(UCC_TL_MLX5_TEAM_LIB(self)->cfg.mcast_conf));
-    if (UCC_OK != status) {
-        tl_warn(tl_context->lib, "mcast team init failed");
-        self->local_mcast_ctx_ready = 0;
-    } else {
-        self->local_mcast_ctx_ready = 1;
+
+    self->local_mcast_team_ready = 0;
+    if (ctx->mcast.mcast_ctx_ready) {
+        status = ucc_tl_mlx5_mcast_team_init(tl_context, &(self->mcast), &(ctx->mcast),
+                                             params, &(UCC_TL_MLX5_TEAM_LIB(self)->cfg.mcast_conf));
+        if (UCC_OK != status) {
+            tl_warn(tl_context->lib, "mcast team init failed");
+        } else {
+            self->local_mcast_team_ready = 1;
+        }
     }
 
     self->mcast_state = TL_MLX5_TEAM_STATE_MCAST_CTX_CHECK;
@@ -114,7 +119,7 @@ ucc_status_t ucc_tl_mlx5_team_destroy(ucc_base_team_t *tl_team)
     return UCC_OK;
 }
 
-static inline ucc_status_t ucc_tl_mlx5_a2a_team_test(ucc_base_team_t *team)
+static inline ucc_status_t ucc_tl_mlx5_alltoall_team_test(ucc_base_team_t *team)
 {
     ucc_tl_mlx5_team_t *tl_team   = ucc_derived_of(team, ucc_tl_mlx5_team_t);
 
@@ -152,6 +157,7 @@ static inline ucc_status_t ucc_tl_mlx5_a2a_team_test(ucc_base_team_t *team)
 ucc_status_t ucc_tl_mlx5_team_create_test(ucc_base_team_t *team)
 {
     ucc_tl_mlx5_team_t            *tl_team      = ucc_derived_of(team, ucc_tl_mlx5_team_t);
+    ucc_tl_mlx5_context_t         *ctx          = UCC_TL_MLX5_TEAM_CTX(tl_team);
     ucc_team_t                    *core_team    = UCC_TL_CORE_TEAM(tl_team);
     ucc_subset_t                   subset       = {.map = UCC_TL_TEAM_MAP(tl_team),
                                                    .myrank = UCC_TL_TEAM_RANK(tl_team)};
@@ -186,16 +192,16 @@ ucc_status_t ucc_tl_mlx5_team_create_test(ucc_base_team_t *team)
                 /* mcast context is not available for some of the team members so we cannot create
                  * mcast team */
                 tl_debug(UCC_TL_TEAM_LIB(tl_team),
-                         "failure during mcast ctx create, no mcast team support");
+                         "some of the ranks do not have mcast context available so no mcast team is created");
 
-                if (tl_team->local_mcast_ctx_ready) {
+                if (tl_team->local_mcast_team_ready) {
                     comm = tl_team->mcast->mcast_comm;
                     /* release the resources */
                     if (ibv_dereg_mr(comm->grh_mr)) {
                         tl_warn(UCC_TL_TEAM_LIB(tl_team),
                                 "ibv_dereg_mr failed");
                     }
-                    if (ibv_destroy_cq(comm->rcq)) {
+                    if (ibv_destroy_cq(comm->mcast.rcq)) {
                         tl_warn(UCC_TL_TEAM_LIB(tl_team),
                                 "ibv_destroy_cq failed");
                     }
@@ -230,36 +236,35 @@ ucc_status_t ucc_tl_mlx5_team_create_test(ucc_base_team_t *team)
                 tl_team->mcast_state = TL_MLX5_TEAM_STATE_MCAST_NOT_AVAILABLE;
             }
 
-            tl_debug(team->context->lib, "attempted to initialize tl team: %p: MCAST component is %s ALLTOALL component is %s",
+            tl_debug(team->context->lib, "team %p: MCAST component is %s ALLTOALL component is %s",
                     team, (tl_team->mcast_state == TL_MLX5_TEAM_STATE_MCAST_READY)?"ENABLED":"DISABLED",
                     (tl_team->a2a_state == TL_MLX5_TEAM_STATE_ALLTOALL_READY)?"ENABLED":"DISABLED");
-        }
-
-        if (tl_team->mcast_state == TL_MLX5_TEAM_STATE_MCAST_NOT_AVAILABLE &&
-            tl_team->a2a_state == TL_MLX5_TEAM_STATE_ALLTOALL_NOT_AVAILABLE) {
-            tl_warn(team->context->lib, "unable to initialize tl team as both ALLTOALL and MCAST are not available: %p", team);
-            return UCC_ERR_NO_RESOURCE;
         }
 
         return UCC_OK;
     }
 
     ucc_assert(tl_team->global_sync_req == NULL);
-    
+
     if (tl_team->mcast_state == TL_MLX5_TEAM_STATE_MCAST_CTX_CHECK &&
         tl_team->a2a_state == TL_MLX5_TEAM_STATE_ALLTOALL_CTX_CHECK) {
         // check if ctx is ready for a2a and mcast
         tl_team->local_status_array[UCC_TL_MLX5_A2A_STATUS_INDEX] =
             tl_team->a2a_status.local;
         tl_team->local_status_array[UCC_TL_MLX5_MCAST_STATUS_INDEX] =
-            (tl_team->local_mcast_ctx_ready) ? UCC_OK : UCC_ERR_NO_RESOURCE;
+            (tl_team->local_mcast_team_ready) ? UCC_OK : UCC_ERR_NO_RESOURCE;
         goto initial_sync_post;
     }
 
-    a2a_status = ucc_tl_mlx5_a2a_team_test(team);
-    if (a2a_status < 0) {
-        tl_warn(team->context->lib, "ALLTOALL tl team: %p creation failed %d",
-                team, a2a_status);
+    if (ctx->cfg.enable_alltoall) {
+        a2a_status = ucc_tl_mlx5_alltoall_team_test(team);
+        if (a2a_status < 0) {
+            tl_warn(team->context->lib,
+                    "ALLTOALL tl team: %p creation failed %d", team,
+                    a2a_status);
+            tl_team->a2a_state = TL_MLX5_TEAM_STATE_ALLTOALL_NOT_AVAILABLE;
+        }
+    } else {
         tl_team->a2a_state = TL_MLX5_TEAM_STATE_ALLTOALL_NOT_AVAILABLE;
     }
 
@@ -272,7 +277,7 @@ ucc_status_t ucc_tl_mlx5_team_create_test(ucc_base_team_t *team)
         }
     }
 
-    if (UCC_OK != a2a_status || UCC_OK != mcast_status) {
+    if (UCC_INPROGRESS == a2a_status || UCC_INPROGRESS == mcast_status) {
         return UCC_INPROGRESS;
     }
 
@@ -299,25 +304,28 @@ initial_sync_post:
     return UCC_INPROGRESS;
 }
 
-ucc_status_t ucc_tl_mlx5_team_get_scores(ucc_base_team_t *  tl_team,
+ucc_status_t ucc_tl_mlx5_team_get_scores(ucc_base_team_t *tl_team,
                                          ucc_coll_score_t **score_p)
 {
-    ucc_tl_mlx5_team_t *team  = ucc_derived_of(tl_team, ucc_tl_mlx5_team_t);
-    ucc_base_context_t *ctx   = UCC_TL_TEAM_CTX(team);
-    ucc_base_lib_t     *lib   = UCC_TL_TEAM_LIB(team);
-    ucc_memory_type_t   mt[2] = {UCC_MEMORY_TYPE_HOST, UCC_MEMORY_TYPE_CUDA};
+    ucc_tl_mlx5_team_t    *team   = ucc_derived_of(tl_team, ucc_tl_mlx5_team_t);
+    ucc_base_context_t    *ctx    = UCC_TL_TEAM_CTX(team);
+    ucc_tl_mlx5_context_t *tl_ctx = ucc_derived_of(ctx, ucc_tl_mlx5_context_t);
+    ucc_base_lib_t        *lib    = UCC_TL_TEAM_LIB(team);
+    ucc_memory_type_t      mt[2]  = {UCC_MEMORY_TYPE_HOST, UCC_MEMORY_TYPE_CUDA};
     ucc_coll_score_t          *score;
     ucc_status_t               status;
     ucc_coll_score_team_info_t team_info;
 
+
     team_info.alg_fn              = NULL;
     team_info.default_score       = UCC_TL_MLX5_DEFAULT_SCORE;
     team_info.init                = ucc_tl_mlx5_coll_init;
-    team_info.num_mem_types       = 2;
+    team_info.num_mem_types       = tl_ctx->supported_mem_types & UCC_BIT(UCC_MEMORY_TYPE_CUDA) ? 2 : 1;
     team_info.supported_mem_types = mt;
     team_info.supported_colls =
         (UCC_COLL_TYPE_ALLTOALL * (team->a2a_state == TL_MLX5_TEAM_STATE_ALLTOALL_READY)) |
-        UCC_COLL_TYPE_BCAST * (team->mcast_state == TL_MLX5_TEAM_STATE_MCAST_READY);
+        (UCC_COLL_TYPE_BCAST | UCC_COLL_TYPE_ALLGATHER) *
+        (team->mcast_state == TL_MLX5_TEAM_STATE_MCAST_READY);
     team_info.size                = UCC_TL_TEAM_SIZE(team);
 
     status = ucc_coll_score_build_default(
