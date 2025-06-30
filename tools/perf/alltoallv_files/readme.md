@@ -29,10 +29,10 @@ Jonathan Paul's tool for generating matrices: https://gitlab-master.nvidia.com/e
 ## Analyzing Scripts
 Iv'e added 2 python scripts that will help with extracting data from the inner logs files and creating informative graphs.
 1. ### Inner logs extraction from directory
-[inner_logs_extract.py](/inner_logs_extract.py) - input path should point to a folder with all the inner log files, output path will be a csv file that combines all files into 1 table.
+[inner_logs_extract.py](https://github.com/x41lakazam/ucc/blob/yael_updates/tools/perf/alltoallv_files/inner_logs_extract.py) - input path should point to a folder with all the inner log files, output path will be a csv file that combines all files into 1 table.
 
 2. ### Create analyzing graphs
-[graph_from_inner_log.py](/graph_from_inner_log.py) -
+[graph_from_inner_log.py](https://github.com/x41lakazam/ucc/blob/yael_updates/tools/perf/alltoallv_files/graph_from_inner_log.py) -
 This script analyzes alltoallv performance data and generates a variety of informative graphs and CSVs. Below is a summary of the outputs:
 
 #### Single-Cluster Analysis Graphs
