@@ -236,7 +236,7 @@ def plot_latency_boxplot(df: pd.DataFrame, config: Config):
     fig_width = max(12, num_matrices * 1.5)
     
     plt.figure(figsize=(fig_width, 8))
-    sns.boxplot(x='matrix', y='latency', data=df, palette='viridis')
+    sns.boxplot(x='matrix', y='latency', data=df, palette='viridis', showfliers=False)
     
     plt.title('Latency Distribution Comparison Across Matrices', fontsize=18, pad=20)
     plt.xlabel('Matrix', fontsize=14)

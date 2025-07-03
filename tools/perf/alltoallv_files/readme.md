@@ -26,6 +26,19 @@ The inner loop log absolute path should be provided in the environment variable 
 ## Matrix Generator
 Jonathan Paul's tool for generating matrices: https://gitlab-master.nvidia.com/e2e-arch-network/a2aV_analysis_misc_tools
 
+## Run script
+Added here a run script used to run on IL1
+Container is a pytorch container + UCC & UCX binaries relevant for this perf test.
+
+####A2AV flag explanation:
+* UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT, UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR - as explained in Parameters section
+* UCC_TL_UCP_ALLTOALLV_PAIRWISE_NUM_POSTS - Maximum number of outstanding send and receive messages in alltoallv pairwise algorithm. If put "0" the algorithm will choose the team size ("one shot").
+* UCC_TL_UCP_TUNE=alltoallv:pairwise - Tune pairwise algorithm
+* UCC_TLS=ucp - essential for this benchmark
+**The rest are UCX flags that are cluster/run specific. Can be found in [UCX github repo](https://github.com/openucx/ucx)
+
+
+
 ## Analyzing Scripts
 Iv'e added 2 python scripts that will help with extracting data from the inner logs files and creating informative graphs.
 1. ### Inner logs extraction from directory
