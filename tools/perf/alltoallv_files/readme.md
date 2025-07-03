@@ -35,6 +35,7 @@ Container is a pytorch container + UCC & UCX binaries relevant for this perf tes
 * UCC_TL_UCP_ALLTOALLV_PAIRWISE_NUM_POSTS - Maximum number of outstanding send and receive messages in alltoallv pairwise algorithm. If put "0" the algorithm will choose the team size ("one shot").
 * UCC_TL_UCP_TUNE=alltoallv:pairwise - Tune pairwise algorithm
 * UCC_TLS=ucp - essential for this benchmark
+
 **The rest are UCX flags that are cluster/run specific. Can be found in [UCX github repo](https://github.com/openucx/ucx)
 
 
