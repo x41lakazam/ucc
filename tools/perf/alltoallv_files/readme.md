@@ -1,99 +1,194 @@
-## Implementation 
-Currently ucc perftest runs N iterations for every message size, we decided to include all the alltoallv executions in each iteration. The run_single_coll_test method is responsible for running the N iterations, from now on let's denote those iterations the main iterations.
-To do so we added an inner loop to run_single_coll_test, this loop is executing alltoallv with every transfer matrix provided. Therefore in each main iteration, all the matrices are executed.
-At the beginning of the test, every matrix file is read and the matrices are stored in the memory. Then in the inner loop a method called coll->pre_run has been added to modify the collective arguments accordingly to the right matrix, this method is ran in each inner loop before the collective execution.
-The send and receives buffers are allocated once in the beginning of the test, their allocation size is the biggest possible size (calculated across the matrices). Note that with a real workload, there might be additional time for the allocation & registration of these buffers (highly optimized in pytorch), this is not the case here.
+# Alltoallv Performance Test with Transfer Matrices
 
-## Output interpertation
-Bottom line: the "max time" is the relevant metric, it represents the time it took for the whole collective to finish.
-The main output (in stdout) is printing the average, min and max time it took the ranks to execute all the matrices, averaged over the main iterations (controlled by -n and -w). Therefore the only relevant piece here is the max time, as it represents the time it took, in average, to execute every collectives (i.e every matrix).
-Note that after each alltoallv execution, a barrier is executed, therefore the ranks start at the same time and the maximum time represents the time since the first rank started the collective until the last rank finished. By the way, the time measurement don't include the barrier.
+## Background
 
-**Inner logs: in addition to the output log mentioned above, the test will give inner log files (in the path named in UCC_PT_COLL_INNER_LOG_FILE parameter). You will get a file for each rank (number of the ranl will be mentioned after the .log). In each file there will be a line for each iteration with that rank's latency for this iteration (in us).
+In Mixture-of-Experts (MoE) models, each token is routed to a subset of experts. This dynamic assignment leads to irregular communication patterns across devices.
+
+To support this efficiently, **`alltoallv`** is used—it allows each process to send and receive variable-sized data to/from every other process. This is critical for MoE training where:
+
+- Different tokens require different experts.
+- Expert assignment changes per batch.
+- Communication volume varies across ranks.
+
+`alltoallv` enables scalable, flexible token-to-expert routing and is essential for high-performance distributed MoE training.
+
+
+---
+
+## Overview
+
+This document describes the implementation, configuration, and usage of the modified UCC perftest for evaluating `alltoallv` performance using custom transfer matrices. The test runs multiple iterations over a set of predefined data exchange patterns, providing detailed timing information and log outputs.
+
+---
+
+## Implementation Details
+
+The performance test is structured around **main iterations**, each consisting of a complete cycle through all provided transfer matrices. This design allows consistent benchmarking across different communication patterns.
+
+- The `run_single_coll_test` method handles the main iterations.
+- An inner loop was added to run all `alltoallv` operations with the provided transfer matrices during each main iteration.
+- All transfer matrices are loaded into memory before the test begins.
+- A new `coll->pre_run` method was added to adjust collective arguments per matrix before each inner execution.
+- Send/receive buffers are allocated once at the beginning using the largest matrix size for simplicity and performance.
+
+> **Note:** Buffer allocation time is not measured. In real workloads (e.g., PyTorch), buffer registration may introduce additional overhead.
+
+---
+
+## Output Interpretation
+
+### Console Output (stdout)
+
+The output reports average, minimum, and maximum latency across all ranks for all transfer matrices:
+
+- **Max time** is the key metric—it indicates the slowest rank to finish during each main iteration and reflects overall synchronization.
+- Each matrix execution is followed by a **barrier**, ensuring that all ranks begin the next collective at the same time.
+- Timing does **not** include the barrier itself.
+
+### Inner Logs
+
+Detailed per-rank latency data is logged to files specified by the `UCC_PT_COLL_INNER_LOG_FILE` environment variable:
+
+- One `.log` file per rank.
+- Each file contains a latency entry (in microseconds) for every main iteration.
+
+---
 
 ## Parameters
-The transfer matrix should be written in a file where each row contains the elements separated by a space, each element is a number of bytes. It support convenient unit usage of megabytes and gigabytes, in the format 1G or 5M.
-There is support for multiple transfer matrices, which will be executed one after the other. All the transfer matrices should be in a directory and the path to this directory needs to be passed to the environment variable UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR. The directory should contain only the matrices files, and the number of matrices should be passed in the environment variable. UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT.
-Each transfer matrix should be in a file named after the index of the matrix, therefore the name of the file should be a number between 0 and UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT-1 (the directory should contain files named 0, 1, ...).
-Note that if UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT doesn't match the number of files in the directory, an error will be thrown.
 
-The -b (min_count) and -b (max_count) arguments of ucc perfest are not relevant here and should be set to 0 (-b 0 -e 0). This is because they control the message size and here we use the matrices to control this.
+### Transfer Matrices
 
-The -j (n_inner_iter) argument should be the same as UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT.
+- Each matrix file should contain rows of byte counts, space-separated.
+- Units like `M` (megabytes) and `G` (gigabytes) are supported (e.g., `5M`, `1G`).
+- All matrix files must reside in a single directory.
+- Set the following environment variables:
+  - `UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR`: path to matrix directory.
+  - `UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT`: number of matrix files.
 
-The inner loop log absolute path should be provided in the environment variable UCC_PT_COLL_INNER_LOG_FILE.
+> File names should be numeric (e.g., `0`, `1`, …, `N-1`), where `N` is the count.
+
+Mismatch between file count and `*_COUNT` will result in an error.
+
+### UCC Perftest CLI Flags
+
+- Set `-b 0 -e 0` (message size is controlled by matrices, not these flags).
+- Set `-j` (number of inner iterations) to match `*_MATRICES_COUNT`.
+
+---
+
+## Environment Variables Summary
+
+| Variable                                         | Description                                                       |
+|--------------------------------------------------|-------------------------------------------------------------------|
+| `UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT`  | Number of transfer matrices                                       |
+| `UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR`    | Directory containing matrix files                                 |
+| `UCC_PT_COLL_INNER_LOG_FILE`                     | Path prefix for per-rank inner log files                          |
+| `UCC_TL_UCP_ALLTOALLV_PAIRWISE_NUM_POSTS`        | Max outstanding messages in pairwise algorithm                    |
+| `UCC_TL_UCP_TUNE=alltoallv:pairwise`             | Enable tuning for pairwise algorithm                              |
+| `UCC_TLS=ucp`                                     | Specifies UCP transport for the test                              |
+
+> Additional UCX-related flags may be needed depending on cluster configuration. Refer to the [UCX GitHub repo](https://github.com/openucx/ucx) for details.
+
+---
+
+## Container Information
+
+**Container URI:**
+docker://gitlab-master.nvidia.com/dc_scale/cloudai_nccl_ucc:all2allv_ucc_perf_pytorch25_03_v1.4_share
+
+It includes:
+- PyTorch 25_03
+- The specific UCC and UCX binaries
+- Logging support for inner loop latency measurements
+
+---
 
 ## Matrix Generator
-Jonathan Paul's tool for generating matrices: https://gitlab-master.nvidia.com/e2e-arch-network/a2aV_analysis_misc_tools
 
-## Run script
-Added here a run script used to run on IL1
-Container is a pytorch container + UCC & UCX binaries relevant for this perf test.
+A matrix generator tool is available here:  
+🔗 https://gitlab-master.nvidia.com/e2e-arch-network/a2aV_analysis_misc_tools
 
-####A2AV flag explanation:
-* UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT, UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR - as explained in Parameters section
-* UCC_TL_UCP_ALLTOALLV_PAIRWISE_NUM_POSTS - Maximum number of outstanding send and receive messages in alltoallv pairwise algorithm. If put "0" the algorithm will choose the team size ("one shot").
-* UCC_TL_UCP_TUNE=alltoallv:pairwise - Tune pairwise algorithm
-* UCC_TLS=ucp - essential for this benchmark
+---
 
-**The rest are UCX flags that are cluster/run specific. Can be found in [UCX github repo](https://github.com/openucx/ucx)
+## Extraction Script
+
+To analyze inner log files:
+
+📄 [inner_logs_extract.py](https://github.com/x41lakazam/ucc/blob/yael_updates/tools/perf/alltoallv_files/inner_logs_extract.py)
+
+- **Input**: Directory containing all `.log` files  
+- **Output**: Single `.csv` with per-iteration latency per rank
+
+---
+## Alltoallv Inner Log Analysis Graphs
+
+This section explains the various graphs generated from the Alltoallv inner logs (after extraction in privious script), providing insights into latency, bandwidth, and message size distributions and comparisons across different benchmark configurations and clusters.
+
+### Single-Cluster Analysis Graphs
+
+These graphs are generated for a single cluster's performance data.
 
 
+#### 1. Latency Distribution Comparison Boxplot
 
-## Analyzing Scripts
-Iv'e added 2 python scripts that will help with extracting data from the inner logs files and creating informative graphs.
-1. ### Inner logs extraction from directory
-[inner_logs_extract.py](https://github.com/x41lakazam/ucc/blob/yael_updates/tools/perf/alltoallv_files/inner_logs_extract.py) - input path should point to a folder with all the inner log files, output path will be a csv file that combines all files into 1 table.
+* **File Name**: `boxplot_latency_comparison.png`
+* **Description**: This boxplot provides a comparative view of latency distributions across all analyzed matrices. Each box represents a different matrix, showing the median, quartiles, and potential outliers (though outliers are suppressed in these plots for clarity).
+* **Insight**: Allows for quick visual comparison of central tendency and spread of latencies between different communication patterns.
 
-2. ### Create analyzing graphs
-[graph_from_inner_log.py](https://github.com/x41lakazam/ucc/blob/yael_updates/tools/perf/alltoallv_files/graph_from_inner_log.py) -
-This script analyzes alltoallv performance data and generates a variety of informative graphs and CSVs. Below is a summary of the outputs:
+#### 2. Aggregated Latency Histograms
 
-#### Single-Cluster Analysis Graphs
+* **File Name Pattern**: `matrix_{matrix_id}_{metric}_histogram.png` (e.g., `matrix_0_0_max_latency_histogram.png`)
+* **Description**: These histograms show the distribution of aggregated latency metrics (Maximum, Minimum, and Median latency) across all ranks for each iteration within a given matrix. Each data point in these histograms represents the calculated metric (max, min, or median) from a single iteration of the benchmark.
+* **Insight**: Provides insight into the consistency and variability of overall iteration performance rather than individual rank-to-rank latencies. For example, the "Max Latency" histogram shows the distribution of job completion times per iteration.
 
-- **Individual Latency Histograms**  
-  Shows the distribution of individual latency measurements for each matrix.  
-  *File: `matrix{id}_histogram.png`*
+#### 3. Sent Message Size vs. Average Latency Dual-Axis Bar Charts
 
-- **Latency Comparison Boxplot**  
-  Compares latency distributions across all matrices in a single boxplot.  
-  *File: `boxplot_latency_comparison.png`*
+* **File Name Pattern**: `matrix{matrix_id}_sent_vs_latency.png`
+* **Description**: These dual-axis bar charts compare the total message size sent by each rank with its average latency for a specific matrix. One y-axis represents message size (MB), and the other represents average latency (us).
+* **Insight**: Helps to visualize the relationship between the amount of data a rank sends and the average latency it experiences, potentially highlighting bottlenecks or correlations.
 
-- **Aggregated Latency Histograms**  
-  For each matrix, shows histograms of max, min, and median latency per iteration.  
-  *Files: `matrix_{id}_{metric}_histogram.png` in `aggregated_latency_histograms/`*
+#### 4. Effective Bandwidth Per Rank Bar Charts
 
-- **Message Size vs Latency Dual-Axis Charts**  
-  Dual-axis bar charts showing message size sent (MB) and average latency (μs) per rank.  
-  *File: `matrix{id}_sent_vs_latency.png`*
+* **File Name Pattern**: `matrix{matrix_id}_bandwidth.png`
+* **Description**: These bar charts illustrate the calculated effective bandwidth (MB/s) for each rank within a given matrix. The effective bandwidth is derived from the maximum of sent/received bytes and the average latency.
+* **Insight**: Shows how bandwidth is distributed among ranks and helps identify if any specific rank is underperforming in terms of data transfer efficiency.
 
-- **Effective Bandwidth per Rank**  
-  Bar chart of effective bandwidth (MB/s) for each rank.  
-  *File: `matrix{id}_bandwidth.png`*
+#### 5. Normality Test Results
 
-#### Two-Cluster Comparison Graphs
+* **File Name**: `normality_test_results.csv`
+* **Description**: This CSV file contains the results of Kolmogorov-Smirnov (KS) and Shapiro-Wilk (SW) normality tests performed on the aggregated latency distributions (max, min, median latencies per iteration).
+* **Insight**: Provides statistical evidence regarding whether the latency distributions for different metrics resemble a normal distribution, which can be important for further statistical analysis assumptions.
 
-- **Mean Bandwidth Comparison**  
-  Side-by-side bar chart comparing average effective bandwidth between clusters.  
-  *File: `cluster_comparison_mean_bw.png`*
+### Two-Cluster Comparison Graphs
 
-- **Bandwidth Variance Comparison**  
-  Side-by-side bar chart comparing bandwidth variance between clusters.  
-  *File: `cluster_comparison_variance_bw.png`*
+These graphs compare performance metrics between two different clusters (labeled as 'Cluster A' and 'Cluster B' in this analysis).
 
-- **Coefficient of Variation Comparison**  
-  Side-by-side bar chart comparing normalized bandwidth variability (std/mean).  
-  *File: `cluster_comparison_cov_bw.png`*
+#### 1. Mean Bandwidth Comparison Between Clusters
 
-- **Distribution Comparison Plots**  
-  KDE plots comparing the shapes of max, min, and median latency distributions between clusters.  
-  *Files: `cluster_comparison_{metric}_dists.png`*
+* **File Name**: `cluster_comparison_mean_bw.png`
+* **Description**: A side-by-side bar chart comparing the mean effective bandwidth (MB/s) for each matrix between the two clusters.
+* **Insight**: Directly compares the average data transfer rates achieved by similar communication patterns on different cluster environments.
 
-#### Additional Outputs
+#### 2. Bandwidth Variance Comparison Between Clusters
 
-- **Job Completion Time CSV**  
-  `jct_results.csv`: Average max latency per iteration (Job Completion Time) for each matrix.
-- **Enriched Data CSV**  
-  `enriched_average_latencies.csv`: Data with calculated bandwidth and message size metrics.
-- **Normality Test Results**  
-  `normality_test_results.csv` and `normality_test_results_both_clusters.csv`: Results of statistical normality tests on latency distributions.
+* **File Name**: `cluster_comparison_variance_bw.png`
+* **Description**: A side-by-side bar chart comparing the variance of the effective bandwidth for each matrix between the two clusters.
+* **Insight**: Illustrates the consistency of bandwidth performance across iterations within each matrix for both clusters. Higher variance indicates more fluctuation.
+
+#### 3. Coefficient of Variance of Effective BW Comparison Between Clusters
+
+* **File Name**: `cluster_comparison_cov_bw.png`
+* **Description**: A side-by-side bar chart comparing the Coefficient of Variance (CoV = Standard Deviation / Mean) of the effective bandwidth for each matrix between the two clusters.
+* **Insight**: Provides a normalized measure of dispersion, allowing for a better comparison of relative variability in bandwidth performance between clusters, especially when their means differ significantly.
+
+#### 4. Aggregated Latency Distribution Comparisons
+
+* **File Name Pattern**: `cluster_comparison_{metric}_dists.png` (e.g., `cluster_comparison_max_latency_dists.png`)
+* **Description**: These plots use Kernel Density Estimation (KDE) to compare the distributions of aggregated latency metrics (Max Latency, Min Latency, Median Latency) between the two clusters for each matrix. Solid lines represent Cluster A, and dashed lines represent Cluster B.
+* **Insight**: Offers a visual comparison of the entire distribution shapes, revealing differences in skewness, modality, and spread of aggregated latencies between the two cluster environments.
+
+#### 5. Combined Normality Test Results
+
+* **File Name**: `normality_test_results_both_clusters.csv`
+* **Description**: This CSV consolidates the normality test results (KS and SW statistics and p-values) for aggregated latency distributions from both clusters, including a 'Cluster' column to differentiate between Custer A and Cluster B.
+* **Insight**: Allows for a direct statistical comparison of the normality of latency distributions between the two environments.

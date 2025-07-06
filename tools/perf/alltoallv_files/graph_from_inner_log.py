@@ -23,12 +23,12 @@ class Config:
     Groups all configuration variables and file paths for easy management.
     """
     # --- Input Data Paths ---
-    CSV_PATH_CLUSTER_A = '/path/to/combined_latency_new_cc_16N.csv'
-    CSV_PATH_CLUSTER_B = '/path/to/combined_latency_16N_120625_oci.csv'
-    MATRIX_FILES_PATH = '/path/to/transfer_matrices/12_06_25/16N'
+    CSV_PATH_CLUSTER_A = '/mtrsysgwork/yyacobovich/install/all2allv/raw_latency_res/combined_latency_new_cc_16N.csv'
+    CSV_PATH_CLUSTER_B = '/mtrsysgwork/yyacobovich/install/all2allv/raw_latency_res/combined_latency_16N_120625_oci.csv'
+    MATRIX_FILES_PATH = '/mtrsysgwork/yyacobovich/install/all2allv/transfer_matrices/12_06_25/16N'
 
     # --- Output Directories ---
-    BASE_OUTPUT_PATH = 'path/to/output/graphs/new_cc/16N'
+    BASE_OUTPUT_PATH = '/mtrsysgwork/yyacobovich/install/all2allv/graphs4/new_cc/16N'
     ORIGINAL_GRAPHS_PATH = os.path.join(BASE_OUTPUT_PATH, 'original_graphs')
     AGGREGATED_GRAPHS_PATH = os.path.join(BASE_OUTPUT_PATH, 'aggregated_latency_histograms')
     
@@ -38,8 +38,6 @@ class Config:
     NORMALITY_TEST_CSV_PATH = os.path.join(ORIGINAL_GRAPHS_PATH, 'normality_test_results.csv')
 
     # --- Benchmark Parameters ---
-    CLUSTER_A_NAME = "IL1"
-    CLUSTER_B_NAME = "OCI"
     NUM_RANKS = 16
     BENCHMARKS = ['0', '1', '2', '3']
     EXISTING_MATRICES = ['0', '1', '2']
@@ -208,26 +206,6 @@ def perform_normality_tests(df: pd.DataFrame, config: Config):
 
 
 # --- Plotting Functions ---
-
-def plot_latency_histograms(df: pd.DataFrame, config: Config):
-    """Generates and saves a latency histogram for each matrix."""
-    log.info("Generating histograms of individual latencies.")
-    for mat_id in df['matrix'].unique():
-        plt.figure(figsize=(12, 7))
-        matrix_data = df[df['matrix'] == mat_id]
-        plt.hist(matrix_data['latency'], bins=100, edgecolor='black', color='skyblue')
-        
-        matrix_name = config.MATRIX_NAMES.get(mat_id, f"Matrix {mat_id}")
-        plt.title(f'Latency Distribution for {matrix_name}')
-        plt.xlabel('Latency (us)')
-        plt.ylabel('Frequency')
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        plt.tight_layout()
-        
-        save_path = os.path.join(config.ORIGINAL_GRAPHS_PATH, f'matrix{mat_id}_histogram.png')
-        plt.savefig(save_path)
-        plt.close()
-
 
 def plot_latency_boxplot(df: pd.DataFrame, config: Config):
     """Generates and saves a boxplot comparing latency distributions across all matrices."""
@@ -484,13 +462,13 @@ def run_comparison_analysis(df1: pd.DataFrame, df2: pd.DataFrame, config: Config
     # 1. Compare Mean Bandwidth
     mean_bw1 = enriched_df1.groupby('matrix')['effective_bw_mbps'].mean()
     mean_bw2 = enriched_df2.groupby('matrix')['effective_bw_mbps'].mean()
-    mean_comp_df = pd.DataFrame({f'{config.CLUSTER_A_NAME}_Mean_BW': mean_bw1, f'{config.CLUSTER_B_NAME}_Mean_BW': mean_bw2}).dropna()
+    mean_comp_df = pd.DataFrame({'IL1_Mean_BW': mean_bw1, 'OCI-NRT_Mean_BW': mean_bw2}).dropna()
     
     if not mean_comp_df.empty:
         mean_comp_df.index = mean_comp_df.index.map(config.MATRIX_NAMES)
         plot_comparison_bar_chart(
-            df=mean_comp_df, col1=f'{config.CLUSTER_A_NAME}_Mean_BW', col2=f'{config.CLUSTER_B_NAME}_Mean_BW',
-            label1=config.CLUSTER_A_NAME, label2=config.CLUSTER_B_NAME,
+            df=mean_comp_df, col1='IL1_Mean_BW', col2='OCI-NRT_Mean_BW',
+            label1='IL1', label2='OCI-NRT',
             ylabel='Mean Effective BW (MB/s)',
             title='Mean Bandwidth Comparison Between Clusters',
             save_path=os.path.join(config.ORIGINAL_GRAPHS_PATH, 'cluster_comparison_mean_bw.png')
@@ -501,13 +479,13 @@ def run_comparison_analysis(df1: pd.DataFrame, df2: pd.DataFrame, config: Config
     # 2. Compare Bandwidth Variance
     var_bw1 = enriched_df1.groupby('matrix')['effective_bw_mbps'].var()
     var_bw2 = enriched_df2.groupby('matrix')['effective_bw_mbps'].var()
-    var_comp_df = pd.DataFrame({f'{config.CLUSTER_A_NAME}_Var_BW': var_bw1, f'{config.CLUSTER_B_NAME}_Var_BW': var_bw2}).dropna()
+    var_comp_df = pd.DataFrame({'IL1_Var_BW': var_bw1, 'OCI-NRT_Var_BW': var_bw2}).dropna()
     
     if not var_comp_df.empty:
         var_comp_df.index = var_comp_df.index.map(config.MATRIX_NAMES)
         plot_comparison_bar_chart(
-            df=var_comp_df, col1=f'{config.CLUSTER_A_NAME}_Var_BW', col2=f'{config.CLUSTER_B_NAME}_Var_BW',
-            label1=config.CLUSTER_A_NAME, label2=config.CLUSTER_B_NAME,
+            df=var_comp_df, col1='IL1_Var_BW', col2='OCI-NRT_Var_BW',
+            label1='IL1', label2='OCI-NRT',
             ylabel='Variance of Effective BW',
             title='Bandwidth Variance Comparison Between Clusters',
             save_path=os.path.join(config.ORIGINAL_GRAPHS_PATH, 'cluster_comparison_variance_bw.png')
@@ -519,15 +497,15 @@ def run_comparison_analysis(df1: pd.DataFrame, df2: pd.DataFrame, config: Config
     std_bw2 = enriched_df2.groupby('matrix')['effective_bw_mbps'].std()
     mean_bw1 = enriched_df1.groupby('matrix')['effective_bw_mbps'].mean()
     mean_bw2 = enriched_df2.groupby('matrix')['effective_bw_mbps'].mean()
-    std_comp_df = pd.DataFrame({f'{config.CLUSTER_A_NAME}_Std_BW': std_bw1, f'{config.CLUSTER_B_NAME}_Std_BW': std_bw2}).dropna()
-    std_comp_df[f'{config.CLUSTER_A_NAME}_CoV_BW'] = std_comp_df[f'{config.CLUSTER_A_NAME}_Std_BW'] / mean_bw1
-    std_comp_df[f'{config.CLUSTER_B_NAME}_CoV_BW'] = std_comp_df[f'{config.CLUSTER_B_NAME}_Std_BW'] / mean_bw2
+    std_comp_df = pd.DataFrame({'IL1_Std_BW': std_bw1, 'OCI-NRT_Std_BW': std_bw2}).dropna()
+    std_comp_df['IL1_CoV_BW'] = std_comp_df['IL1_Std_BW'] / mean_bw1
+    std_comp_df['OCI-NRT_CoV_BW'] = std_comp_df['OCI-NRT_Std_BW'] / mean_bw2
     
     if not std_comp_df.empty:
         std_comp_df.index = std_comp_df.index.map(config.MATRIX_NAMES)
         plot_comparison_bar_chart(
-            df=std_comp_df, col1=f'{config.CLUSTER_A_NAME}_CoV_BW', col2=f'{config.CLUSTER_B_NAME}_CoV_BW',
-            label1=config.CLUSTER_A_NAME, label2=config.CLUSTER_B_NAME,
+            df=std_comp_df, col1='IL1_CoV_BW', col2='OCI-NRT_CoV_BW',
+            label1='IL1', label2='OCI-NRT',
             ylabel='Coefficient of Variance of Effective BW',
             title='Coefficient of Variance of Effective BW Comparison Between Clusters',
             save_path=os.path.join(config.ORIGINAL_GRAPHS_PATH, 'cluster_comparison_cov_bw.png')
@@ -546,7 +524,7 @@ def run_comparison_analysis(df1: pd.DataFrame, df2: pd.DataFrame, config: Config
     for metric in ['Max Latency', 'Min Latency', 'Median Latency']:
         plot_comparison_dist_lines(
             agg_df1=agg1, agg_df2=agg2, metric=metric,
-            name1=config.CLUSTER_A_NAME, name2=config.CLUSTER_B_NAME,
+            name1='IL1', name2='OCI-NRT',
             config=config, output_path=config.ORIGINAL_GRAPHS_PATH
         )
         
@@ -554,8 +532,8 @@ def run_comparison_analysis(df1: pd.DataFrame, df2: pd.DataFrame, config: Config
     normality_test_results_1 = perform_normality_tests(df1, config)
     normality_test_results_2 = perform_normality_tests(df2, config)
     # concatenate the normality test results with the matrix names
-    normality_test_results_1['Cluster'] = config.CLUSTER_A_NAME
-    normality_test_results_2['Cluster'] = config.CLUSTER_B_NAME
+    normality_test_results_1['Cluster'] = 'IL1'
+    normality_test_results_2['Cluster'] = 'OCI-NRT'
     normality_test_results = pd.concat([normality_test_results_1, normality_test_results_2])
     # save the normality test results
     normality_test_results.to_csv(os.path.join(config.ORIGINAL_GRAPHS_PATH, 'normality_test_results_both_clusters.csv'), index=False)
