@@ -94,8 +94,7 @@ Mismatch between file count and `*_COUNT` will result in an error.
 ## Container Information
 
 **Container URI:**
-docker://gitlab-master.nvidia.com/dc_scale/cloudai_nccl_ucc:all2allv_ucc_perf_pytorch25_03_v1.4_share
-
+docker://gitlab-master.nvidia.com:5005/yyacobovich/my_containers:all2allv_ucc_perf_pytorch25_03_v1.4_inner_logs
 It includes:
 - PyTorch 25_03
 - The specific UCC and UCX binaries
@@ -123,6 +122,8 @@ To analyze inner log files:
 ## Alltoallv Inner Log Analysis Graphs
 
 This section explains the various graphs generated from the Alltoallv inner logs (after extraction in privious script), providing insights into latency, bandwidth, and message size distributions and comparisons across different benchmark configurations and clusters.
+
+📄 [graph_from_inner_log.py](https://github.com/x41lakazam/ucc/blob/yael_updates/tools/perf/alltoallv_files/graph_from_inner_log.py)
 
 ### Single-Cluster Analysis Graphs
 
