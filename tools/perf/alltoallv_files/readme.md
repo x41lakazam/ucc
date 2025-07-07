@@ -94,7 +94,8 @@ Mismatch between file count and `*_COUNT` will result in an error.
 ## Container Information
 
 **Container URI:**
-docker://gitlab-master.nvidia.com:5005/yyacobovich/my_containers:all2allv_ucc_perf_pytorch25_03_v1.4_inner_logs
+[docker://gitlab-master.nvidia.com:5005/yyacobovich/my_containers:all2allv_ucc_perf_pytorch25_03_v1.4_inner_logs](docker://gitlab-master.nvidia.com:5005/yyacobovich/my_containers:all2allv_ucc_perf_pytorch25_03_v1.4_inner_logs)
+
 It includes:
 - PyTorch 25_03
 - The specific UCC and UCX binaries
