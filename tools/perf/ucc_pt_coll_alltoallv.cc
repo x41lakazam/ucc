@@ -20,7 +20,7 @@
 
 ucc_pt_coll_alltoallv::ucc_pt_coll_alltoallv(ucc_datatype_t dt,
                          ucc_memory_type mt, bool is_inplace,
-                         bool is_persistent,
+                         bool is_persistent, int shuffle_cols, int n_iters,
                          ucc_pt_comm *communicator) : ucc_pt_coll(communicator)
 {
     has_inplace_   = true;
@@ -28,6 +28,8 @@ ucc_pt_coll_alltoallv::ucc_pt_coll_alltoallv(ucc_datatype_t dt,
     has_range_     = false;
     has_bw_        = true;
     root_shift_    = 0;
+    shuffle_cols_  = shuffle_cols;
+    n_iters_       = n_iters;
 
     coll_args.mask                = UCC_COLL_ARGS_FIELD_FLAGS;
     coll_args.coll_type           = UCC_COLL_TYPE_ALLTOALLV;
@@ -55,7 +57,6 @@ float ucc_pt_coll_alltoallv::get_bw(float time_ms, int grsize,
     float            S    = 0;
     size_t src_size = 0, dst_size = 0;
     int current_rank = comm->get_rank();
-
 
     for (int i = 0; i < grsize; i++) {
         if (i == current_rank) {
@@ -112,6 +113,31 @@ double parse_transfer_matrix_token(std::string token)
 * The element (i,j) represents the number of bytes rank i will send to rank j. 
 * The notation support convenient unit notation for gigabytes and megabytes, e.g 3G or 10M.
 */
+
+std::vector<std::vector<double>> transpose_transfer_matrix(std::vector<std::vector<double>>& transfer_matrix)
+{
+    int N = transfer_matrix.size();
+    // Create a new matrix with the same size
+    std::vector<std::vector<double>> transposed_matrix(N, std::vector<double>(N, 0));
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            transposed_matrix[i][j] = transfer_matrix[j][i];
+        }
+    }
+    return transposed_matrix;
+}
+
+
+void shuffle_matrix(std::vector<std::vector<double>>& transfer_matrix){
+    // gets transposed matrix
+    // shuffle the columns using uniform seed so all ranks have the same shuffle    
+    std::default_random_engine rng(1);
+    std::shuffle(transfer_matrix.begin(), transfer_matrix.end(), rng);
+    // transpose the matrix back and assign to the original matrix
+    transfer_matrix = transpose_transfer_matrix(transfer_matrix);
+}
+
+
 void fill_transfer_matrix(std::vector<std::vector<double>>& transfer_matrix, std::string filename)
 {
     std::ifstream f;
@@ -148,7 +174,7 @@ void fill_transfer_matrix(std::vector<std::vector<double>>& transfer_matrix, std
 }
 
 
-void fill_transfer_matrices(std::vector<std::vector<std::vector<double>>>& transfer_matrices, std::string transfer_matrices_dir)
+void fill_transfer_matrices(std::vector<std::vector<std::vector<double>>>& transfer_matrices, std::string transfer_matrices_dir, int shuffle_cols)
 {
     std::string fn;
     std::exception_ptr exc;
@@ -156,16 +182,23 @@ void fill_transfer_matrices(std::vector<std::vector<std::vector<double>>>& trans
     if (transfer_matrices_dir.back() != '/')
         transfer_matrices_dir.push_back('/');
         
-    for (int mat_ix=0; mat_ix < transfer_matrices.size(); mat_ix++){
-        fn = transfer_matrices_dir + std::to_string(mat_ix);
-
-        try{
-            fill_transfer_matrix(transfer_matrices[mat_ix], fn);
+    fn = transfer_matrices_dir + std::to_string(0);
+    try{
+        fill_transfer_matrix(transfer_matrices[0], fn);
+    }
+    catch (const std::exception& e){
+        std::cerr << "Exception when trying to fill matrix number " << std::to_string(0) << ": " << e.what() << std::endl;
+        throw;
+    }
+    std::cout << "number of matrices: " << transfer_matrices.size() << std::endl;
+    if (shuffle_cols && transfer_matrices.size() > 1){ 
+        std::cout << "Shuffling columns" << std::endl;   
+        transfer_matrices[1] = transpose_transfer_matrix(transfer_matrices[0]);
+        for (int mat_ix=1; mat_ix < transfer_matrices.size(); mat_ix++){
+            transfer_matrices[mat_ix] = transfer_matrices[1];
+            shuffle_matrix(transfer_matrices[mat_ix]);
         }
-        catch (const std::exception& e){
-            std::cerr << "Exception when trying to fill matrix number " << std::to_string(mat_ix) << ": " << e.what() << std::endl;
-            throw;
-        }
+        std::cout << "Shuffled columns - done!" << std::endl;
     }
 }
 
@@ -187,31 +220,6 @@ void ucc_pt_coll_alltoallv::print_transfer_matrix(const std::vector<std::vector<
 }
 
 
-std::vector<std::vector<double>> ucc_pt_coll_alltoallv::transpose_transfer_matrix(std::vector<std::vector<double>>& transfer_matrix)
-{
-    int N = transfer_matrix.size();
-    // Create a new matrix with the same size
-    std::vector<std::vector<double>> transposed_matrix(N, std::vector<double>(N, 0));
-    for (int i = 0; i < N; i++) {
-        for (int j = 0; j < N; j++) {
-            transposed_matrix[i][j] = transfer_matrix[j][i];
-        }
-    }
-    return transposed_matrix;
-}
-
-
-void ucc_pt_coll_alltoallv::shuffle_matrix(int seed){
-    // Simple column shuffling
-    std::vector<std::vector<double>>& matrix = get_first_transfer_matrix();
-    // transpose
-    std::vector<std::vector<double>> transposed_matrix = transpose_transfer_matrix(matrix);
-    // shuffle the columns using synchronized seed
-    std::default_random_engine rng(seed);
-    std::shuffle(transposed_matrix.begin(), transposed_matrix.end(), rng);
-    // transpose the matrix back and assign to the original matrix
-    matrix = transpose_transfer_matrix(transposed_matrix);
-}
 
 int count_files_in_dir(std::string path){    
     int count = 0;
@@ -229,11 +237,11 @@ int count_files_in_dir(std::string path){
     return count;
 }
 
-void ucc_pt_coll_alltoallv::pre_run(ucc_coll_args_t &args, int iter, int inner_iter, int shuffle_cols) {
+void ucc_pt_coll_alltoallv::pre_run(ucc_coll_args_t &args, int iter, int shuffle_cols) {
     int                                 comm_size = comm->get_size();
     int                                 comm_rank = comm->get_rank();
     size_t                              dt_size   = ucc_dt_size(coll_args.src.info_v.datatype);
-    int                                 matrix_ix = std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT") ? inner_iter : 1;
+    int                                 matrix_ix = shuffle_cols ? iter : 1;
     int                                 src_displacement = 0;
     int                                 dst_displacement = 0;
     int                                 send_count, recv_count;
@@ -254,6 +262,8 @@ void ucc_pt_coll_alltoallv::pre_run(ucc_coll_args_t &args, int iter, int inner_i
         src_displacement += send_count;
         dst_displacement += recv_count;
     }
+    // std::cout << "iteration: " << iter << "rank: " << comm_rank << std::endl;
+    // print_transfer_matrix(transfer_matrices[matrix_ix], "Transfer matrix");
 }
 
 ucc_status_t ucc_pt_coll_alltoallv::init_args(size_t count, ucc_pt_test_args_t &test_args)
@@ -264,14 +274,14 @@ ucc_status_t ucc_pt_coll_alltoallv::init_args(size_t count, ucc_pt_test_args_t &
     size_t                              dst_header_size, src_header_size, max_dst_header_size, max_src_header_size;
     ucc_status_t                        st        = UCC_OK;
     int                                 n_matrices = 1;
-    std::string                              transfer_matrices_dir;
+    std::string                         transfer_matrices_dir;
 
     // Temporary: Forbid usage without transfer matrices
-    if (!std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR") || !std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT")){
-        std::cerr << "One of those required environment variables were not provided: UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR, UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT" << std::endl;
+    if (!std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR")){
+        std::cerr << "Required environment variable was not provided: UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR" << std::endl;
         std::terminate();
     }
-    // End of temporary snippet 
+    //End of temporary snippet 
 
     if (std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT")){
         if (!std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR"))
@@ -286,11 +296,20 @@ ucc_status_t ucc_pt_coll_alltoallv::init_args(size_t count, ucc_pt_test_args_t &
             throw std::invalid_argument("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT doesn't match the count of files in UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR");
     }
 
+    // if shuffle cols is set, we need to use the number of iterations as the number of matrices
+    std::cout << "shuffle_cols_: " << shuffle_cols_ << std::endl;
+    std::cout << "n_iters_: " << n_iters_ << std::endl;
+    if (shuffle_cols_ && n_iters_ > 1){
+        std::cout << "resizing number of matrices to " << n_iters_ << std::endl;
+        n_matrices = n_iters_;
+    }
     transfer_matrices.resize(n_matrices, std::vector<std::vector<double>>(comm_size, std::vector<double>(comm_size, count)));
 
     if (std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_DIR"))
-        fill_transfer_matrices(transfer_matrices, transfer_matrices_dir);
+        fill_transfer_matrices(transfer_matrices, transfer_matrices_dir, shuffle_cols_);
     
+    // Add a barrier so that all ranks complete init_args before any proceed
+    comm->barrier();
     max_src_header_size = max_dst_header_size = 0;
     for (int mat_ix=0; mat_ix < transfer_matrices.size(); mat_ix++){
         src_header_size = dst_header_size = 0;

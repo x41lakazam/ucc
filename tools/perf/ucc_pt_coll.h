@@ -32,6 +32,8 @@ protected:
     bool has_range_;
     bool has_bw_;
     int  root_shift_;
+    int  shuffle_cols_ = 0;
+    int  n_iters_ = 0;
     ucc_pt_comm *comm;
     ucc_coll_args_t coll_args;
     ucc_ee_executor_task_args_t executor_args;
@@ -42,15 +44,14 @@ public:
     {
         comm = communicator;
     }
-    virtual ucc_status_t init_args(size_t count,
-                                   ucc_pt_test_args_t &args) = 0;
+    virtual ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) = 0;
     virtual void free_args(ucc_pt_test_args_t &args) = 0;
     virtual float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args)
     {
         return 0.0;
     }
-    virtual void pre_run(ucc_coll_args_t &args, int iter, int inner_iter, int shuffle_cols = 0) {}
-    virtual void shuffle_matrix(int seed) {}
+    virtual void pre_run(ucc_coll_args_t &args, int iter, int shuffle_cols) {}
+    virtual void shuffle_matrix(std::vector<std::vector<double>>& transfer_matrix) {}
     bool has_reduction();
     bool has_inplace();
     bool has_range();
@@ -101,18 +102,16 @@ class ucc_pt_coll_alltoallv: public ucc_pt_coll {
 public:
     ucc_pt_coll_alltoallv(ucc_datatype_t dt, ucc_memory_type mt,
                           bool is_inplace, bool is_persistent,
+                          int shuffle_cols, int n_iter_small,
                           ucc_pt_comm *communicator);
     ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
     void free_args(ucc_pt_test_args_t &args) override;
-    void pre_run(ucc_coll_args_t &args, int iter, int inner_iter, int shuffle_cols = 0) override;
+    void pre_run(ucc_coll_args_t &args, int iter, int shuffle_cols) override;
     float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
-    void shuffle_matrix(int seed);
-    std::vector<std::vector<double>> transpose_transfer_matrix(std::vector<std::vector<double>>& transfer_matrix);
     void print_transfer_matrix(const std::vector<std::vector<double>>& matrix, const std::string& title = "");
     
     // Getter method for benchmark access
     std::vector<std::vector<std::vector<double>>>& get_transfer_matrices() { return transfer_matrices; }
-    std::vector<std::vector<double>>& get_first_transfer_matrix() { return transfer_matrices[0]; }
 
 protected:
     std::vector<std::vector<std::vector<double>>> transfer_matrices;

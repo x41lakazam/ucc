@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See file LICENSE for terms.
  */
@@ -25,6 +25,7 @@ ucc_pt_config::ucc_pt_config() {
     bench.n_iter_large   = 200;
     bench.n_warmup_large = 20;
     bench.n_inner_iter   = 1;
+    bench.shuffle_cols   = atoi(std::getenv("UCC_PT_COLL_ALLTOALLV_SHUFFLE_COLS"));
     bench.large_thresh   = 64 * 1024;
     bench.full_print     = false;
     bench.n_bufs         = UCC_PT_DEFAULT_N_BUFS;

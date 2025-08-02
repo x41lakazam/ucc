@@ -43,7 +43,7 @@ ucc_pt_benchmark::ucc_pt_benchmark(ucc_pt_benchmark_config cfg,
         break;
     case UCC_PT_OP_TYPE_ALLTOALLV:
         coll = new ucc_pt_coll_alltoallv(cfg.dt, cfg.mt, cfg.inplace,
-                                         cfg.persistent, comm);
+                                         cfg.persistent, cfg.shuffle_cols, cfg.n_iter_small, comm);
         break;
     case UCC_PT_OP_TYPE_BARRIER:
         coll = new ucc_pt_coll_barrier(comm);
@@ -110,6 +110,9 @@ ucc_status_t ucc_pt_benchmark::run_bench() noexcept
     if (config.op_type == UCC_PT_OP_TYPE_ALLTOALLV && std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT")) {
         config.n_inner_iter = atoi(std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT"));
     }
+    if (config.op_type == UCC_PT_OP_TYPE_ALLTOALLV && std::getenv("UCC_PT_COLL_ALLTOALLV_SHUFFLE_COLS")) {
+        config.shuffle_cols = atoi(std::getenv("UCC_PT_COLL_ALLTOALLV_SHUFFLE_COLS"));
+    }
     if ( config.n_inner_iter > 1) {
         std::cerr << "Error: UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT > 1 is not supported in this benchmark." << std::endl;
         std::terminate();
@@ -119,7 +122,6 @@ ucc_status_t ucc_pt_benchmark::run_bench() noexcept
         size_t coll_size = cnt * ucc_dt_size(config.dt);
         int iter = config.n_iter_small;
         int warmup = config.n_warmup_small;
-        int inner_iter = config.n_inner_iter;
         if (coll_size >= config.large_thresh) {
             iter = config.n_iter_large;
             warmup = config.n_warmup_large;
@@ -127,7 +129,7 @@ ucc_status_t ucc_pt_benchmark::run_bench() noexcept
         args.coll_args.root = config.root;
         UCCCHECK_GOTO(coll->init_args(cnt, args), exit_err, st);
         if ((uint64_t)config.op_type < (uint64_t)UCC_COLL_TYPE_LAST) {
-            UCCCHECK_GOTO(run_single_coll_test(args.coll_args, warmup, iter, inner_iter, time, sum_max_inner_time),
+            UCCCHECK_GOTO(run_single_coll_test(args.coll_args, warmup, iter, time, sum_max_inner_time),
                           free_coll, st);
         } else {
             UCCCHECK_GOTO(run_single_executor_test(args.executor_args,
@@ -159,9 +161,7 @@ static inline double get_time_us(void)
 
 ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
                                                     int nwarmup, int niter,
-                                                    int n_inner_iter,
-                                                    double &time,
-                                                    double &avg_max_inner_time)
+                                                    double &time, double &avg_max_inner_time)
                                                     noexcept
 {
     const bool    triggered  = config.triggered;
@@ -175,13 +175,17 @@ ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
     double inner_time;
     std::string inner_log_file_name;
     std::ofstream inner_log_file;
+    int shuffle_cols = 0;
 
-    // Temporary
-    n_inner_iter = atoi(std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT"));
+
     if (std::getenv("UCC_PT_COLL_ALLTOALLV_SHUFFLE_COLS")) {
         shuffle_cols = atoi(std::getenv("UCC_PT_COLL_ALLTOALLV_SHUFFLE_COLS"));
     }
-    // End of temporary
+    if (config.shuffle_cols != shuffle_cols) {
+        std::cerr << "Error: UCC_PT_COLL_ALLTOALLV_SHUFFLE_COLS doesn't match the shuffle_cols in the config." << std::endl;
+        std::terminate();
+    }
+
 
     UCCCHECK_GOTO(comm->barrier(), exit_err, st);
     time = 0;
@@ -214,17 +218,17 @@ ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
         }
     }
         for (int i = 0; i < nwarmup + niter; i++) {
-        double iteration_total_time = 0;
+            
+            double iteration_total_time = 0;
 
 
-        for (int inner_iter = 0; inner_iter < n_inner_iter; inner_iter++) {
             if (shuffle_cols) {
-                std::cout << "Shuffle cols" << std::endl;
-                // barrier
-                comm->barrier();
-                coll->shuffle_matrix(i);
+                coll->pre_run(args, i < nwarmup ? 0 : i - nwarmup, shuffle_cols);
+
             }
-            coll->pre_run(args, i, inner_iter, shuffle_cols);
+            else {
+                coll->pre_run(args, 0, 0);
+            }
             double s = get_time_us();
 
             if (!persistent) {
@@ -273,7 +277,7 @@ ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
                     inner_log_file << std::to_string(inner_time) << " ";
                 }
             }
-        }
+        
 
 
         if (i >= nwarmup && inner_log_file.is_open()) {
@@ -401,6 +405,10 @@ void ucc_pt_benchmark::print_header()
                   << "Inner iterations: "
                   << config.n_inner_iter
                   << std::endl;
+        std::cout << std::left << std::setw(24)
+                  << "Shuffle cols: "
+                  << config.shuffle_cols
+                  << std::endl;
         std::cout.copyfmt(iostate);
         std::cout << std::endl;
         std::cout << std::setw(24) << "Time, us";
@@ -442,8 +450,12 @@ void ucc_pt_benchmark::print_time(size_t count, ucc_pt_test_args_t args,
                     std::cout << std::setw(24) << coll->get_bw(time_max, gsize,
                                                                args);
                 } else if (config.op_type == UCC_PT_OP_TYPE_ALLTOALLV) {
-                    std::cout << std::setw(24) << coll->get_bw(sum_max_inner_time, gsize,
-                                                               args);
+                    if (config.shuffle_cols) {
+                        std::cout << std::setw(24) << "N/A";
+                    } else {
+                        std::cout << std::setw(24) << coll->get_bw(sum_max_inner_time, gsize,
+                                                                args);
+                    }
                 } else {
                     std::cout << std::setw(24) << coll->get_bw(time_max, gsize,
                                                                args);

@@ -92,6 +92,7 @@ struct ucc_pt_benchmark_config {
     int                root;
     int                root_shift;
     int                mult_factor;
+    int                shuffle_cols;
 };
 
 struct ucc_pt_config {
