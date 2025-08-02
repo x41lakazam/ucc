@@ -49,7 +49,8 @@ public:
     {
         return 0.0;
     }
-    virtual void pre_run(ucc_coll_args_t &args, int iter, int inner_iter) {}
+    virtual void pre_run(ucc_coll_args_t &args, int iter, int inner_iter, int shuffle_cols = 0) {}
+    virtual void shuffle_matrix(int seed) {}
     bool has_reduction();
     bool has_inplace();
     bool has_range();
@@ -103,7 +104,15 @@ public:
                           ucc_pt_comm *communicator);
     ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
     void free_args(ucc_pt_test_args_t &args) override;
-    void pre_run(ucc_coll_args_t &args, int iter, int inner_iter) override;
+    void pre_run(ucc_coll_args_t &args, int iter, int inner_iter, int shuffle_cols = 0) override;
+    float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
+    void shuffle_matrix(int seed);
+    std::vector<std::vector<double>> transpose_transfer_matrix(std::vector<std::vector<double>>& transfer_matrix);
+    void print_transfer_matrix(const std::vector<std::vector<double>>& matrix, const std::string& title = "");
+    
+    // Getter method for benchmark access
+    std::vector<std::vector<std::vector<double>>>& get_transfer_matrices() { return transfer_matrices; }
+    std::vector<std::vector<double>>& get_first_transfer_matrix() { return transfer_matrices[0]; }
 
 protected:
     std::vector<std::vector<std::vector<double>>> transfer_matrices;

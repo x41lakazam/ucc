@@ -13,6 +13,10 @@
 #include <fstream>
 #include <iostream>
 #include <dirent.h>
+#include <vector>
+#include <algorithm>
+#include <numeric>
+#include <random>
 
 ucc_pt_coll_alltoallv::ucc_pt_coll_alltoallv(ucc_datatype_t dt,
                          ucc_memory_type mt, bool is_inplace,
@@ -21,8 +25,8 @@ ucc_pt_coll_alltoallv::ucc_pt_coll_alltoallv(ucc_datatype_t dt,
 {
     has_inplace_   = true;
     has_reduction_ = false;
-    has_range_     = true;
-    has_bw_        = false;
+    has_range_     = false;
+    has_bw_        = true;
     root_shift_    = 0;
 
     coll_args.mask                = UCC_COLL_ARGS_FIELD_FLAGS;
@@ -43,6 +47,33 @@ ucc_pt_coll_alltoallv::ucc_pt_coll_alltoallv(ucc_datatype_t dt,
 
 }
 
+float ucc_pt_coll_alltoallv::get_bw(float time_ms, int grsize,
+    ucc_pt_test_args_t test_args)
+{
+    ucc_coll_args_t &args = test_args.coll_args;
+    //float            N    = grsize;
+    float            S    = 0;
+    size_t src_size = 0, dst_size = 0;
+    int current_rank = comm->get_rank();
+
+
+    for (int i = 0; i < grsize; i++) {
+        if (i == current_rank) {
+            continue; // skip self
+        }
+        src_size += ucc_coll_args_get_count(&args, args.src.info_v.counts, i);
+        dst_size += ucc_coll_args_get_count(&args, args.dst.info_v.counts, i);
+    }
+    src_size *= ucc_dt_size(args.src.info_v.datatype);
+    dst_size *= ucc_dt_size(args.dst.info_v.datatype);
+    S = src_size > dst_size ? src_size : dst_size;
+    //std::cout << "S: " << S << std::endl;
+    //std::cout << "time_ms: " << time_ms << std::endl;
+
+    //return (S / time_ms) * ((N - 1) / N) / 1000.0;
+    return (S / time_ms) / 1000.0;
+}
+
 double parse_transfer_matrix_token(std::string token)
 {
     size_t size;
@@ -58,6 +89,9 @@ double parse_transfer_matrix_token(std::string token)
     {
         switch(token[size])
         {
+            case 'K':
+                val *= 1e3;
+                break;
             case 'M':
                 val *= 1e6;
                 break;
@@ -113,6 +147,7 @@ void fill_transfer_matrix(std::vector<std::vector<double>>& transfer_matrix, std
     }
 }
 
+
 void fill_transfer_matrices(std::vector<std::vector<std::vector<double>>>& transfer_matrices, std::string transfer_matrices_dir)
 {
     std::string fn;
@@ -134,6 +169,50 @@ void fill_transfer_matrices(std::vector<std::vector<std::vector<double>>>& trans
     }
 }
 
+void ucc_pt_coll_alltoallv::print_transfer_matrix(const std::vector<std::vector<double>>& matrix, const std::string& title) {
+    if (!title.empty()) {
+        std::cout << title << std::endl;
+    }
+    for (const auto& row : matrix) {
+        std::cout << "[";
+        for (size_t i = 0; i < row.size(); ++i) {
+            std::cout << row[i];
+            if (i < row.size() - 1) {
+                std::cout << ", ";
+            }
+        }
+        std::cout << "]" << std::endl;
+    }
+    std::cout << std::endl;
+}
+
+
+std::vector<std::vector<double>> ucc_pt_coll_alltoallv::transpose_transfer_matrix(std::vector<std::vector<double>>& transfer_matrix)
+{
+    int N = transfer_matrix.size();
+    // Create a new matrix with the same size
+    std::vector<std::vector<double>> transposed_matrix(N, std::vector<double>(N, 0));
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            transposed_matrix[i][j] = transfer_matrix[j][i];
+        }
+    }
+    return transposed_matrix;
+}
+
+
+void ucc_pt_coll_alltoallv::shuffle_matrix(int seed){
+    // Simple column shuffling
+    std::vector<std::vector<double>>& matrix = get_first_transfer_matrix();
+    // transpose
+    std::vector<std::vector<double>> transposed_matrix = transpose_transfer_matrix(matrix);
+    // shuffle the columns using synchronized seed
+    std::default_random_engine rng(seed);
+    std::shuffle(transposed_matrix.begin(), transposed_matrix.end(), rng);
+    // transpose the matrix back and assign to the original matrix
+    matrix = transpose_transfer_matrix(transposed_matrix);
+}
+
 int count_files_in_dir(std::string path){    
     int count = 0;
     DIR* dir = opendir(path.c_str());
@@ -150,7 +229,7 @@ int count_files_in_dir(std::string path){
     return count;
 }
 
-void ucc_pt_coll_alltoallv::pre_run(ucc_coll_args_t &args, int iter, int inner_iter) {
+void ucc_pt_coll_alltoallv::pre_run(ucc_coll_args_t &args, int iter, int inner_iter, int shuffle_cols) {
     int                                 comm_size = comm->get_size();
     int                                 comm_rank = comm->get_rank();
     size_t                              dt_size   = ucc_dt_size(coll_args.src.info_v.datatype);
@@ -162,9 +241,10 @@ void ucc_pt_coll_alltoallv::pre_run(ucc_coll_args_t &args, int iter, int inner_i
     if (matrix_ix > transfer_matrices.size())
         throw std::invalid_argument("Inner iteration is " + std::to_string(matrix_ix) + " but no matrix is available at this index.");
 
+
     for (int i = 0; i < comm_size; i++) {
-        send_count = std::floor(transfer_matrices[inner_iter][comm_rank][i] / dt_size);
-        recv_count = std::floor(transfer_matrices[inner_iter][i][comm_rank] / dt_size);
+        send_count = std::floor(transfer_matrices[matrix_ix][comm_rank][i] / dt_size);
+        recv_count = std::floor(transfer_matrices[matrix_ix][i][comm_rank] / dt_size);
 
         ((uint32_t*)args.src.info_v.counts)[i] = send_count;
         ((uint32_t*)args.src.info_v.displacements)[i] = src_displacement;

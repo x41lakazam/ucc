@@ -8,6 +8,8 @@
 #include <vector>
 #include <iostream>
 #include <fstream>
+#include <random>
+#include <algorithm>
 #include "ucc_pt_benchmark.h"
 #include "components/mc/ucc_mc.h"
 #include "ucc_perftest.h"
@@ -19,7 +21,8 @@
 ucc_pt_benchmark::ucc_pt_benchmark(ucc_pt_benchmark_config cfg,
                                    ucc_pt_comm *communicator):
     config(cfg),
-    comm(communicator)
+    comm(communicator),
+    shuffle_cols(0)
 {
     switch (cfg.op_type) {
     case UCC_PT_OP_TYPE_ALLGATHER:
@@ -101,7 +104,16 @@ ucc_status_t ucc_pt_benchmark::run_bench() noexcept
     ucc_status_t       st;
     ucc_pt_test_args_t args;
     double             time;
+    double             sum_max_inner_time;
 
+    // Update inner_iter from environment variable for alltoallv
+    if (config.op_type == UCC_PT_OP_TYPE_ALLTOALLV && std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT")) {
+        config.n_inner_iter = atoi(std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT"));
+    }
+    if ( config.n_inner_iter > 1) {
+        std::cerr << "Error: UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT > 1 is not supported in this benchmark." << std::endl;
+        std::terminate();
+    }
     print_header();
     for (size_t cnt = min_count; cnt <= max_count; cnt *= config.mult_factor) {
         size_t coll_size = cnt * ucc_dt_size(config.dt);
@@ -115,14 +127,14 @@ ucc_status_t ucc_pt_benchmark::run_bench() noexcept
         args.coll_args.root = config.root;
         UCCCHECK_GOTO(coll->init_args(cnt, args), exit_err, st);
         if ((uint64_t)config.op_type < (uint64_t)UCC_COLL_TYPE_LAST) {
-            UCCCHECK_GOTO(run_single_coll_test(args.coll_args, warmup, iter, inner_iter, time),
+            UCCCHECK_GOTO(run_single_coll_test(args.coll_args, warmup, iter, inner_iter, time, sum_max_inner_time),
                           free_coll, st);
         } else {
             UCCCHECK_GOTO(run_single_executor_test(args.executor_args,
                                                    warmup, iter, time),
                           free_coll, st);
         }
-        print_time(cnt, args, time);
+        print_time(cnt, args, time, sum_max_inner_time);
         coll->free_args(args);
         if (max_count == 0) {
             /* exit from loop when min_count == max_count == 0 */
@@ -148,7 +160,8 @@ static inline double get_time_us(void)
 ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
                                                     int nwarmup, int niter,
                                                     int n_inner_iter,
-                                                    double &time)
+                                                    double &time,
+                                                    double &avg_max_inner_time)
                                                     noexcept
 {
     const bool    triggered  = config.triggered;
@@ -159,12 +172,15 @@ ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
     ucc_coll_req_h req;
     ucc_ee_h ee;
     ucc_ev_t comp_ev, *post_ev;
-    double inner_time, max_inner_time;
+    double inner_time;
     std::string inner_log_file_name;
     std::ofstream inner_log_file;
 
     // Temporary
     n_inner_iter = atoi(std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT"));
+    if (std::getenv("UCC_PT_COLL_ALLTOALLV_SHUFFLE_COLS")) {
+        shuffle_cols = atoi(std::getenv("UCC_PT_COLL_ALLTOALLV_SHUFFLE_COLS"));
+    }
     // End of temporary
 
     UCCCHECK_GOTO(comm->barrier(), exit_err, st);
@@ -197,13 +213,18 @@ ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
             std::terminate();
         }
     }
+        for (int i = 0; i < nwarmup + niter; i++) {
+        double iteration_total_time = 0;
 
-    for (int i = 0; i < nwarmup + niter; i++) {
 
         for (int inner_iter = 0; inner_iter < n_inner_iter; inner_iter++) {
-
-            coll->pre_run(args, i, inner_iter);
-
+            if (shuffle_cols) {
+                std::cout << "Shuffle cols" << std::endl;
+                // barrier
+                comm->barrier();
+                coll->shuffle_matrix(i);
+            }
+            coll->pre_run(args, i, inner_iter, shuffle_cols);
             double s = get_time_us();
 
             if (!persistent) {
@@ -233,13 +254,27 @@ ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
             double f = get_time_us();
             inner_time = f - s;
 
+            iteration_total_time += inner_time;
             if (i >= nwarmup) {
                 time += inner_time;
+                
+                // Find rank with maximum time for this inner iteration
+                double max_inner_time;
+                comm->allreduce(&inner_time, &max_inner_time, 1, UCC_OP_MAX);
+                avg_max_inner_time += max_inner_time;
+
+                // Check if current rank has the max time for this inner iteration
+                if (inner_time == max_inner_time) {
+                    // This rank has the maximum time for this inner iteration
+                    // You can add logging or other actions here if needed
+                }
+                
                 if (inner_log_file.is_open()){
                     inner_log_file << std::to_string(inner_time) << " ";
                 }
             }
         }
+
 
         if (i >= nwarmup && inner_log_file.is_open()) {
             inner_log_file << "\n";
@@ -258,6 +293,7 @@ ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
 
     if (niter != 0) {
         time /= niter;
+        avg_max_inner_time /= niter;
     }
     return UCC_OK;
 free_req:
@@ -367,70 +403,49 @@ void ucc_pt_benchmark::print_header()
                   << std::endl;
         std::cout.copyfmt(iostate);
         std::cout << std::endl;
-        std::cout << std::setw(12) << "Count"
-                  << std::setw(12) << "Size"
-                  << std::setw(24) << "Time, us";
+        std::cout << std::setw(24) << "Time, us";
         if (config.full_print) {
-            std::cout << std::setw(42) << "Bandwidth, GB/s";
+            std::cout << std::setw(24) << "Bandwidth, GB/s";
         }
         std::cout << std::endl;
-        std::cout << std::setw(36) << "avg"
-                  << std::setw(12) << "min"
-                  << std::setw(12) << "max";
+        std::cout << std::setw(24) << "max";
         if (config.full_print) {
-            std::cout << std::setw(12) << "avg"
-                      << std::setw(12) << "max"
-                      << std::setw(12) << "min";
+            std::cout << std::setw(24) << "max";
         }
         std::cout << std::endl;
     }
 }
 
 void ucc_pt_benchmark::print_time(size_t count, ucc_pt_test_args_t args,
-                                  double time)
+                                  double time, double sum_max_inner_time)
 {
     double time_us = time;
-    size_t size    = count * ucc_dt_size(config.dt);
+    //size_t size    = count * ucc_dt_size(config.dt);
     int    gsize   = comm->get_size();
-    double time_avg, time_min, time_max;
+    double time_max;
 
-    comm->allreduce(&time_us, &time_min, 1, UCC_OP_MIN);
     comm->allreduce(&time_us, &time_max, 1, UCC_OP_MAX);
-    comm->allreduce(&time_us, &time_avg, 1, UCC_OP_SUM);
-    time_avg /= gsize;
 
     if (comm->get_rank() == 0) {
         std::ios iostate(nullptr);
         iostate.copyfmt(std::cout);
         std::cout << std::setprecision(2) << std::fixed;
-        std::cout << std::setw(12) << (coll->has_range() ?
-                                        std::to_string(count):
-                                        "N/A")
-                  << std::setw(12) << (coll->has_range() ?
-                                        std::to_string(size):
-                                        "N/A")
-                  << std::setw(12) << time_avg
-                  << std::setw(12) << time_min
-                  << std::setw(12) << time_max;
+        std::cout << std::setw(24) << time_max;
 
         if (config.full_print) {
             if (!coll->has_bw()) {
-                std::cout << std::setw(12) << "N/A"
-                          << std::setw(12) << "N/A"
-                          << std::setw(12) << "N/A";
+                std::cout << "no bw" << std::endl;
+                std::cout << std::setw(24) << "N/A";
             } else {
                 if (config.op_type == UCC_PT_OP_TYPE_GATHER ||
                     config.op_type == UCC_PT_OP_TYPE_SCATTER) {
-                    std::cout << std::setw(12) << "N/A"
-                              << std::setw(12) << "N/A"
-                              << std::setw(12) << coll->get_bw(time_max, gsize,
+                    std::cout << std::setw(24) << coll->get_bw(time_max, gsize,
+                                                               args);
+                } else if (config.op_type == UCC_PT_OP_TYPE_ALLTOALLV) {
+                    std::cout << std::setw(24) << coll->get_bw(sum_max_inner_time, gsize,
                                                                args);
                 } else {
-                    std::cout << std::setw(12) << coll->get_bw(time_avg, gsize,
-                                                               args)
-                              << std::setw(12) << coll->get_bw(time_min, gsize,
-                                                               args)
-                              << std::setw(12) << coll->get_bw(time_max, gsize,
+                    std::cout << std::setw(24) << coll->get_bw(time_max, gsize,
                                                                args);
                 }
             }
