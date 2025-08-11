@@ -128,10 +128,10 @@
  }
  
  
- void shuffle_matrix(std::vector<std::vector<double>>& transfer_matrix){
+ void shuffle_matrix(std::vector<std::vector<double>>& transfer_matrix, int iter){
      // gets transposed matrix
      // shuffle the columns using uniform seed so all ranks have the same shuffle    
-     std::default_random_engine rng(1);
+     std::default_random_engine rng(iter);
      std::shuffle(transfer_matrix.begin(), transfer_matrix.end(), rng);
      // transpose the matrix back and assign to the original matrix
      transfer_matrix = transpose_transfer_matrix(transfer_matrix);
@@ -196,7 +196,7 @@
          transfer_matrices[1] = transpose_transfer_matrix(transfer_matrices[0]);
          for (int mat_ix=1; mat_ix < transfer_matrices.size(); mat_ix++){
              transfer_matrices[mat_ix] = transfer_matrices[1];
-             shuffle_matrix(transfer_matrices[mat_ix]);
+             shuffle_matrix(transfer_matrices[mat_ix], mat_ix);
          }
          std::cout << "Shuffled columns - done!" << std::endl;
      }
@@ -263,6 +263,8 @@
          dst_displacement += recv_count;
      }
      std::cout << "iteration: " << iter << "rank: " << comm_rank << std::endl;
+     std::cout << "matrix_ix: " << matrix_ix << std::endl;
+     std::cout << "shuffle_cols: " << shuffle_cols << std::endl;
      print_transfer_matrix(transfer_matrices[matrix_ix], "Transfer matrix");
  }
  
