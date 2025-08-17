@@ -105,6 +105,7 @@
      ucc_pt_test_args_t args;
      double             time;
      double             sum_max_inner_time;
+     float              largest_rank;
  
      // Update inner_iter from environment variable for alltoallv
      if (config.op_type == UCC_PT_OP_TYPE_ALLTOALLV && std::getenv("UCC_PT_COLL_ALLTOALLV_TRANSFER_MATRICES_COUNT")) {
@@ -129,14 +130,14 @@
          args.coll_args.root = config.root;
          UCCCHECK_GOTO(coll->init_args(cnt, args), exit_err, st);
          if ((uint64_t)config.op_type < (uint64_t)UCC_COLL_TYPE_LAST) {
-             UCCCHECK_GOTO(run_single_coll_test(args.coll_args, warmup, iter, time, sum_max_inner_time),
+             UCCCHECK_GOTO(run_single_coll_test(args.coll_args, warmup, iter, time, sum_max_inner_time, largest_rank),
                            free_coll, st);
          } else {
              UCCCHECK_GOTO(run_single_executor_test(args.executor_args,
                                                     warmup, iter, time),
                            free_coll, st);
          }
-         print_time(cnt, args, time, sum_max_inner_time);
+         print_time(cnt, args, time, sum_max_inner_time, largest_rank);
          coll->free_args(args);
          if (max_count == 0) {
              /* exit from loop when min_count == max_count == 0 */
@@ -161,7 +162,7 @@
  
  ucc_status_t ucc_pt_benchmark::run_single_coll_test(ucc_coll_args_t args,
                                                      int nwarmup, int niter,
-                                                     double &time, double &avg_max_inner_time)
+                                                     double &time, double &avg_max_inner_time, float &largest_rank)
                                                      noexcept
  {
      const bool    triggered  = config.triggered;
@@ -224,7 +225,8 @@
  
              if (shuffle_cols) {
                 std::cout << "pre_run with shuffle_cols" << std::endl;
-                 coll->pre_run(args, i < nwarmup ? 0 : i - nwarmup, shuffle_cols);
+                coll->pre_run(args, i < nwarmup ? 0 : i - nwarmup, shuffle_cols);
+                largest_rank += coll->get_largest_rank(args, comm->get_size());
  
              }
              else {
@@ -427,7 +429,7 @@
  }
  
  void ucc_pt_benchmark::print_time(size_t count, ucc_pt_test_args_t args,
-                                   double time, double sum_max_inner_time)
+                                   double time, double sum_max_inner_time, float largest_rank)
  {
      double time_us = time;
      //size_t size    = count * ucc_dt_size(config.dt);
@@ -453,9 +455,10 @@
                                                                 args);
                  } else if (config.op_type == UCC_PT_OP_TYPE_ALLTOALLV) {
                      if (config.shuffle_cols) {
-                         std::cout << std::setw(24) << "N/A";
+                         std::cout << std::setw(24) << coll->get_bw(sum_max_inner_time, largest_rank, gsize,
+                                                                 args);
                      } else {
-                         std::cout << std::setw(24) << coll->get_bw(sum_max_inner_time, gsize,
+                         std::cout << std::setw(24) << coll->get_bw(sum_max_inner_time, largest_rank, gsize,
                                                                  args);
                      }
                  } else {
