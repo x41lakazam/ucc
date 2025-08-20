@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2023-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See file LICENSE for terms.
  */
@@ -16,7 +16,7 @@ typedef struct ucc_tl_mlx5_task {
     union {
         struct {
             ucc_tl_mlx5_mcast_coll_req_t *req_handle;
-        } bcast_mcast;
+        } coll_mcast;
     };
 } ucc_tl_mlx5_task_t;
 
@@ -27,7 +27,8 @@ typedef struct ucc_tl_mlx5_schedule {
             int                          seq_num;
             int                          seq_index;
             int                          num_of_blocks_columns;
-            int                          block_size;
+            int                          block_height;
+            int                          block_width;
             int                          started;
             int                          send_blocks_enqueued;
             int                          blocks_sent;
@@ -79,7 +80,7 @@ ucc_tl_mlx5_get_task(ucc_base_coll_args_t *coll_args, ucc_base_team_t *team)
 
     UCC_TL_MLX5_PROFILE_REQUEST_NEW(task, "tl_mlx5_task", 0);
     ucc_coll_task_init(&task->super, coll_args, team);
-    task->bcast_mcast.req_handle = NULL;
+    task->coll_mcast.req_handle = NULL;
     return task;
 }
 
@@ -113,9 +114,9 @@ static inline void ucc_tl_mlx5_put_schedule(ucc_tl_mlx5_schedule_t *schedule)
     ucc_mpool_put(schedule);
 }
 
-ucc_status_t ucc_tl_mlx5_bcast_mcast_init(ucc_base_coll_args_t *coll_args,
-                                          ucc_base_team_t      *team,
-                                          ucc_coll_task_t     **task_h);
+ucc_status_t ucc_tl_mlx5_coll_mcast_init(ucc_base_coll_args_t *coll_args,
+                                         ucc_base_team_t      *team,
+                                         ucc_coll_task_t     **task_h);
 
 ucc_status_t ucc_tl_mlx5_task_finalize(ucc_coll_task_t *coll_task);
 

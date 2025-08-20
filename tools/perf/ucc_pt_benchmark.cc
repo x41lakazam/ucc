@@ -224,13 +224,13 @@
  
  
              if (shuffle_cols) {
-                std::cout << "pre_run with shuffle_cols" << std::endl;
+                //std::cout << "pre_run with shuffle_cols" << std::endl;
                 coll->pre_run(args, i < nwarmup ? 0 : i - nwarmup, shuffle_cols);
                 largest_rank += coll->get_largest_rank(args, comm->get_size());
  
              }
              else {
-                std::cout << "pre_run without shuffle_cols" << std::endl;
+                //std::cout << "pre_run without shuffle_cols" << std::endl;
                  coll->pre_run(args, 0, 0);
              }
              double s = get_time_us();

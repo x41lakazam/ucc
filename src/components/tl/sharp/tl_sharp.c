@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See file LICENSE for terms.
  */
@@ -19,10 +19,10 @@ static ucc_config_field_t ucc_tl_sharp_lib_config_table[] = {
     {"", "", NULL, ucc_offsetof(ucc_tl_sharp_lib_config_t, super),
      UCC_CONFIG_TYPE_TABLE(ucc_tl_lib_config_table)},
 
-    {"USE_INTERNAL_OOB", "n",
+    {"USE_INTERNAL_OOB", "try",
      "Use service team to create sharp context",
      ucc_offsetof(ucc_tl_sharp_lib_config_t, use_internal_oob),
-     UCC_CONFIG_TYPE_BOOL},
+     UCC_CONFIG_TYPE_TERNARY},
 
     {NULL}};
 
@@ -40,7 +40,7 @@ static ucc_config_field_t ucc_tl_sharp_context_config_table[] = {
      ucc_offsetof(ucc_tl_sharp_context_config_t, use_rcache),
      UCC_CONFIG_TYPE_BOOL},
 
-    {"REG_THRESH", "256",
+    {"REG_THRESH", "0",
      "Size threshold to register buffers",
      ucc_offsetof(ucc_tl_sharp_context_config_t, reg_threshold),
      UCC_CONFIG_TYPE_MEMUNITS},
@@ -71,6 +71,11 @@ static ucc_config_field_t ucc_tl_sharp_context_config_table[] = {
      "SHARP team max PPN threshold",
      ucc_offsetof(ucc_tl_sharp_context_config_t, team_max_ppn),
      UCC_CONFIG_TYPE_UINT},
+
+    {"USE_MULTI_CHANNEL", "0",
+     "Use SHARP Multi-channel feature. Options: 0-disable 1-enable",
+     ucc_offsetof(ucc_tl_sharp_context_config_t, use_multi_channel),
+     UCC_CONFIG_TYPE_BOOL},
 
     {NULL}};
 
