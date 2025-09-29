@@ -46,19 +46,19 @@
      }
      virtual ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) = 0;
      virtual void free_args(ucc_pt_test_args_t &args) = 0;
-     virtual float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args)
+     virtual double get_bw(float time_ms, int grsize, ucc_pt_test_args_t args)
      {
          return 0.0;
      }
      // New overload for collectives that need additional context (e.g., alltoallv)
-     virtual float get_bw(float time_ms, float largest_rank, int grsize, ucc_pt_test_args_t args)
+     virtual double get_bw(float time_ms, double largest_rank, int grsize, ucc_pt_test_args_t args)
      {
          return get_bw(time_ms, grsize, args);
      }
      virtual void pre_run(ucc_coll_args_t &args, int iter, int shuffle_cols) {}
      virtual void shuffle_matrix(std::vector<std::vector<double>>& transfer_matrix) {}
      // Provide a hook for computing largest rank data volume (used by alltoallv)
-     virtual float get_largest_rank(ucc_coll_args_t &args, int grsize) { return 0.0f; }
+     virtual double get_largest_rank(ucc_coll_args_t &args, int grsize) { return 0.0; }
      bool has_reduction();
      bool has_inplace();
      bool has_range();
@@ -73,7 +73,7 @@
                            ucc_pt_comm *communicator);
      ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
      void free_args(ucc_pt_test_args_t &args) override;
-     float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
+     double get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
  };
  
  class ucc_pt_coll_allgatherv: public ucc_pt_coll {
@@ -92,7 +92,7 @@
                            bool is_persistent, ucc_pt_comm *communicator);
      ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
      void free_args(ucc_pt_test_args_t &args) override;
-     float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
+     double get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
  };
  
  class ucc_pt_coll_alltoall: public ucc_pt_coll {
@@ -102,7 +102,7 @@
                           ucc_pt_comm *communicator);
      ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
      void free_args(ucc_pt_test_args_t &args) override;
-     float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
+     double get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
  };
  
  class ucc_pt_coll_alltoallv: public ucc_pt_coll {
@@ -114,8 +114,8 @@
      ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
      void free_args(ucc_pt_test_args_t &args) override;
      void pre_run(ucc_coll_args_t &args, int iter, int shuffle_cols) override;
-     float get_bw(float time_ms, float largest_rank, int grsize, ucc_pt_test_args_t args) override;
-     float get_largest_rank(ucc_coll_args_t &args, int grsize) override;
+     double get_bw(float time_ms, double largest_rank, int grsize, ucc_pt_test_args_t args) override;
+     double get_largest_rank(ucc_coll_args_t &args, int grsize) override;
      void print_transfer_matrix(const std::vector<std::vector<double>>& matrix, const std::string& title = "");
      
      // Getter method for benchmark access
@@ -138,7 +138,7 @@
                        bool is_persistent, ucc_pt_comm *communicator);
      ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
      void free_args(ucc_pt_test_args_t &args) override;
-     float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
+     double get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
  };
  
  class ucc_pt_coll_gather: public ucc_pt_coll {
@@ -148,7 +148,7 @@
                         ucc_pt_comm *communicator);
      ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
      void free_args(ucc_pt_test_args_t &args) override;
-     float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
+     double get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
  };
  
  class ucc_pt_coll_gatherv: public ucc_pt_coll {
@@ -167,7 +167,7 @@
                         int root_shift, ucc_pt_comm *communicator);
      ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
      void free_args(ucc_pt_test_args_t &args) override;
-     float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
+     double get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
  };
  
  class ucc_pt_coll_reduce_scatter: public ucc_pt_coll {
@@ -177,7 +177,7 @@
                                 bool is_persistent, ucc_pt_comm *communicator);
      ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
      void free_args(ucc_pt_test_args_t &args) override;
-     float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
+     double get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
  };
  
  class ucc_pt_coll_reduce_scatterv: public ucc_pt_coll {
@@ -196,7 +196,7 @@
                          ucc_pt_comm *communicator);
      ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
      void free_args(ucc_pt_test_args_t &args) override;
-     float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
+     double get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
  };
  
  class ucc_pt_coll_scatterv: public ucc_pt_coll {
@@ -217,7 +217,7 @@
                       ucc_pt_comm *communicator);
      ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
      void free_args(ucc_pt_test_args_t &args) override;
-     float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
+     double get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
  };
  
  class ucc_pt_op_reduce: public ucc_pt_coll {
@@ -231,7 +231,7 @@
                       ucc_pt_comm *communicator);
      ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
      void free_args(ucc_pt_test_args_t &args) override;
-     float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
+     double get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
  };
  
  class ucc_pt_op_reduce_strided: public ucc_pt_coll {
@@ -245,7 +245,7 @@
                               ucc_pt_comm *communicator);
      ucc_status_t init_args(size_t count, ucc_pt_test_args_t &args) override;
      void free_args(ucc_pt_test_args_t &args) override;
-     float get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
+     double get_bw(float time_ms, int grsize, ucc_pt_test_args_t args) override;
  };
  
  #endif

@@ -93,7 +93,7 @@
      int c;
      ucc_status_t st;
  
-     while ((c = getopt(argc, argv, "c:b:e:d:m:n:w:o:N:r:S:j:iphFT")) != -1) {
+     while ((c = getopt(argc, argv, "c:b:e:d:m:n:w:o:N:r:S:iphFT")) != -1) {
          switch (c) {
              case 'c':
                  if (ucc_pt_op_map.count(optarg) == 0) {
@@ -156,9 +156,6 @@
                  std::stringstream(optarg) >> bench.n_warmup_small;
                  bench.n_warmup_large = bench.n_warmup_small;
                  break;
-             case 'j':
-                 std::stringstream(optarg) >> bench.n_inner_iter;
-                 break;
              case 'f':
                  std::stringstream(optarg) >> bench.mult_factor;
                  break;
@@ -197,12 +194,11 @@
      std::cout << "  -d <dt name>: datatype"<<std::endl;
      std::cout << "  -o <op name>: reduction operation type"<<std::endl;
      std::cout << "  -r <number>: root for rooted collectives"<<std::endl;
-     std::cout << "  -m <mtype name>: memory type"<<std::endl;
-     std::cout << "  -n <number>: number of iterations"<<std::endl;
-     std::cout << "  -w <number>: number of warmup iterations"<<std::endl;
-     std::cout << "  -j <number>: number of inner iterations"<<std::endl;
-     std::cout << "  -f <number>: multiplication factor between sizes. Default : 2."<<std::endl;
-     std::cout << "  -N <number>: number of buffers"<<std::endl;
+         std::cout << "  -m <mtype name>: memory type"<<std::endl;
+    std::cout << "  -n <number>: number of iterations"<<std::endl;
+    std::cout << "  -w <number>: number of warmup iterations"<<std::endl;
+    std::cout << "  -f <number>: multiplication factor between sizes. Default : 2."<<std::endl;
+    std::cout << "  -N <number>: number of buffers"<<std::endl;
      std::cout << "  -T: triggered collective"<<std::endl;
      std::cout << "  -F: enable full print"<<std::endl;
      std::cout << "  -S: <number>: root shift for rooted collectives"<<std::endl;

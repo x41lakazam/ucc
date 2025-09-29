@@ -69,11 +69,11 @@ exit:
     return st;
 }
 
-float ucc_pt_op_memcpy::get_bw(float time_ms, int grsize,
+double ucc_pt_op_memcpy::get_bw(float time_ms, int grsize,
                                 ucc_pt_test_args_t test_args)
 {
     ucc_ee_executor_task_args_t &args = test_args.executor_args;
-    float S;
+    double S;
     int i;
 
     if (args.task_type == UCC_EE_EXECUTOR_TASK_COPY) {

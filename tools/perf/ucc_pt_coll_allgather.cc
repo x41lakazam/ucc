@@ -69,12 +69,12 @@ exit:
     return st;
 }
 
-float ucc_pt_coll_allgather::get_bw(float time_ms, int grsize,
+double ucc_pt_coll_allgather::get_bw(float time_ms, int grsize,
                                     ucc_pt_test_args_t test_args)
 {
     ucc_coll_args_t &args = test_args.coll_args;
-    float           N     = grsize;
-    float           S     = args.dst.info.count *
+    double           N     = grsize;
+    double           S     = args.dst.info.count *
                             ucc_dt_size(args.dst.info.datatype);
 
     return (S / time_ms) * ((N - 1) / N) / 1000.0;

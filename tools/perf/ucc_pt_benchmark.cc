@@ -181,7 +181,7 @@
  
      if (std::getenv("UCC_PT_COLL_ALLTOALLV_SHUFFLE_COLS")) {
          shuffle_cols = atoi(std::getenv("UCC_PT_COLL_ALLTOALLV_SHUFFLE_COLS"));
-     }
+     } 
      if (config.shuffle_cols != shuffle_cols) {
          std::cerr << "Error: UCC_PT_COLL_ALLTOALLV_SHUFFLE_COLS doesn't match the shuffle_cols in the config." << std::endl;
          std::terminate();

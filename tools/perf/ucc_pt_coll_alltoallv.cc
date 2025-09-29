@@ -49,8 +49,8 @@
  
  }
 
- float ucc_pt_coll_alltoallv::get_largest_rank(ucc_coll_args_t &args, int grsize) {
-    float            S    = 0;
+ double ucc_pt_coll_alltoallv::get_largest_rank(ucc_coll_args_t &args, int grsize) {
+    double            S    = 0;
     size_t src_size = 0, dst_size = 0;
     int current_rank = comm->get_rank();
 
@@ -68,12 +68,12 @@
     return S;
  }
  
- float ucc_pt_coll_alltoallv::get_bw(float time_ms, float largest_rank, int grsize,
+ double ucc_pt_coll_alltoallv::get_bw(float time_ms, double largest_rank, int grsize,
      ucc_pt_test_args_t test_args)
  {
      ucc_coll_args_t &args = test_args.coll_args;
      //float            N    = grsize;
-     float            S    = 0;
+     double            S    = 0;
      size_t src_size = 0, dst_size = 0;
      int current_rank = comm->get_rank();
 
@@ -86,7 +86,8 @@
      // Original bandwidth calculation for non-shuffle mode
      for (int i = 0; i < grsize; i++) {
          if (i == current_rank) {
-             continue; // skip self
+            std::cout << "skipping self" << std::endl;
+            continue; // skip self
          }
          src_size += ucc_coll_args_get_count(&args, args.src.info_v.counts, i);
          dst_size += ucc_coll_args_get_count(&args, args.dst.info_v.counts, i);
@@ -94,8 +95,9 @@
      src_size *= ucc_dt_size(args.src.info_v.datatype);
      dst_size *= ucc_dt_size(args.dst.info_v.datatype);
      S = src_size > dst_size ? src_size : dst_size;
-     //std::cout << "S: " << S << std::endl;
-     //std::cout << "time_ms: " << time_ms << std::endl;
+
+     std::cout << "S: " << S << std::endl;
+     std::cout << "time_ms: " << time_ms << std::endl;
 
      //return (S / time_ms) * ((N - 1) / N) / 1000.0;
      return (S / time_ms) / 1000.0;

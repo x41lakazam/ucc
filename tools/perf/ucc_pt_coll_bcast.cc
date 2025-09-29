@@ -56,11 +56,11 @@ void ucc_pt_coll_bcast::free_args(ucc_pt_test_args_t &test_args)
     ucc_pt_free(src_header);
 }
 
-float ucc_pt_coll_bcast::get_bw(float time_ms, int grsize,
+double ucc_pt_coll_bcast::get_bw(float time_ms, int grsize,
                                 ucc_pt_test_args_t test_args)
 {
     ucc_coll_args_t &args = test_args.coll_args;
-    float            S    = args.src.info.count *
+    double           S    = args.src.info.count *
                             ucc_dt_size(args.src.info.datatype);
 
     return S / time_ms / 1000.0;

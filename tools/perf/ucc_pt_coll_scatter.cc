@@ -76,12 +76,12 @@ exit:
     return st_src;
 }
 
-float ucc_pt_coll_scatter::get_bw(float time_ms, int grsize,
+double ucc_pt_coll_scatter::get_bw(float time_ms, int grsize,
                                   ucc_pt_test_args_t test_args)
 {
     ucc_coll_args_t &args = test_args.coll_args;
-    float            S    = args.dst.info.count * ucc_dt_size(args.dst.info.datatype);
-    float            N    = grsize - 1;
+    double           S    = args.dst.info.count * ucc_dt_size(args.dst.info.datatype);
+    double           N    = grsize - 1;
 
     return (S * N) / time_ms / 1000.0;
 }
