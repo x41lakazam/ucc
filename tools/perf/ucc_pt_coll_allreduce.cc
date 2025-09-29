@@ -78,12 +78,12 @@ void ucc_pt_coll_allreduce::free_args(ucc_pt_test_args_t &test_args)
     ucc_pt_free(dst_header);
 }
 
-float ucc_pt_coll_allreduce::get_bw(float time_ms, int grsize,
+double ucc_pt_coll_allreduce::get_bw(float time_ms, int grsize,
                                     ucc_pt_test_args_t test_args)
 {
     ucc_coll_args_t &args = test_args.coll_args;
-    float            N    = grsize;
-    float            S    = args.src.info.count *
+    double           N    = grsize;
+    double           S    = args.src.info.count *
                             ucc_dt_size(args.src.info.datatype);
 
     return (S / time_ms) * (2 * (N - 1) / N) / 1000.0;

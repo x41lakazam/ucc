@@ -66,11 +66,11 @@ exit:
     return st;
 }
 
-float ucc_pt_op_reduce_strided::get_bw(float time_ms, int grsize,
+double ucc_pt_op_reduce_strided::get_bw(float time_ms, int grsize,
                                        ucc_pt_test_args_t test_args)
 {
     ucc_ee_executor_task_args_t &args = test_args.executor_args;
-    float                        S    = args.reduce_strided.count *
+    double                       S    = args.reduce_strided.count *
                                         ucc_dt_size(data_type);
 
     return (num_bufs + 1) * (S / time_ms) / 1000.0;

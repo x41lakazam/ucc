@@ -88,14 +88,14 @@ void ucc_pt_coll_reduce_scatter::free_args(ucc_pt_test_args_t &test_args)
     }
 }
 
-float ucc_pt_coll_reduce_scatter::get_bw(float time_ms, int grsize,
+double ucc_pt_coll_reduce_scatter::get_bw(float time_ms, int grsize,
                                          ucc_pt_test_args_t test_args)
 {
     ucc_coll_args_t &args  = test_args.coll_args;
-    float            N     = grsize;
+    double           N     = grsize;
     size_t           count = UCC_IS_INPLACE(args) ? args.dst.info.count :
                                                    args.src.info.count;
-    float S                = count * ucc_dt_size(args.dst.info.datatype);
+    double           S     = count * ucc_dt_size(args.dst.info.datatype);
 
     return (S / time_ms) * ((N - 1) / N) / 1000.0;
 }

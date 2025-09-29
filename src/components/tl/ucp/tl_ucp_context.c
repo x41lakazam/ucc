@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See file LICENSE for terms.
  */
@@ -12,6 +12,7 @@
 #include "utils/ucc_string.h"
 #include "utils/arch/cpu.h"
 #include "schedule/ucc_schedule_pipelined.h"
+#include "tl_ucp_copy.h"
 #include <limits.h>
 
 #define UCP_CHECK(function, msg, go, ctx)                                      \
@@ -163,6 +164,21 @@ UCC_CLASS_INIT_FUNC(ucc_tl_ucp_context_t,
     prefix[strlen(prefix) - 1] = '\0';
     UCP_CHECK(ucp_config_read(prefix, NULL, &ucp_config),
               "failed to read ucp configuration", err_cfg_read, self);
+    if (!tl_ucp_config->memtype_copy_enable) {
+        UCP_CHECK(ucp_config_modify(ucp_config, "MEMTYPE_COPY_ENABLE", "no"),
+                  "failed to set memtype copy enable option for UCX",
+                  err_cfg, self);
+        if (tl_ucp_config->local_copy_type == UCC_TL_UCP_LOCAL_COPY_TYPE_MC) {
+            tl_info(self->super.super.lib, "memtype copy is disabled in UCX, "
+                    "using local copy type MC might lead to deadlocks in CUDA "
+                    "applications");
+        } else if (tl_ucp_config->local_copy_type == UCC_TL_UCP_LOCAL_COPY_TYPE_EC) {
+            tl_info(self->super.super.lib, "memtype copy is disabled in UCX, "
+                    "using local copy type EC might lead to deadlocks in CUDA "
+                    "applications when CUDA kernel depends on collective "
+                    "communication and stream is not provided to the collective");
+        }
+    }
 
     ucp_params.field_mask =
         UCP_PARAM_FIELD_FEATURES | UCP_PARAM_FIELD_TAG_SENDER_MASK | UCP_PARAM_FIELD_NAME;
@@ -277,6 +293,37 @@ UCC_CLASS_INIT_FUNC(ucc_tl_ucp_context_t,
     }
     ucc_free(prefix);
     prefix = NULL;
+
+
+    switch (self->cfg.local_copy_type) {
+    case UCC_TL_UCP_LOCAL_COPY_TYPE_MC:
+        self->copy.post     = ucc_tl_ucp_mc_copy_post;
+        self->copy.test     = ucc_tl_ucp_mc_copy_test;
+        self->copy.finalize = ucc_tl_ucp_mc_copy_finalize;
+        tl_debug(self->super.super.lib, "using MC for local copy");
+        break;
+    case UCC_TL_UCP_LOCAL_COPY_TYPE_EC:
+    case UCC_TL_UCP_LOCAL_COPY_TYPE_AUTO:
+        self->cfg.local_copy_type = UCC_TL_UCP_LOCAL_COPY_TYPE_EC;
+        self->copy.post     = ucc_tl_ucp_ec_copy_post;
+        self->copy.test     = ucc_tl_ucp_ec_copy_test;
+        self->copy.finalize = ucc_tl_ucp_ec_copy_finalize;
+        tl_debug(self->super.super.lib, "using EC for local copy");
+        break;
+    case UCC_TL_UCP_LOCAL_COPY_TYPE_UCP:
+        self->copy.post     = ucc_tl_ucp_ucp_copy_post;
+        self->copy.test     = ucc_tl_ucp_ucp_copy_test;
+        self->copy.finalize = ucc_tl_ucp_ucp_copy_finalize;
+        tl_debug(self->super.super.lib, "using UCP for local copy");
+        break;
+    default:
+        self->copy.post     = ucc_tl_ucp_ec_copy_post;
+        self->copy.test     = ucc_tl_ucp_ec_copy_test;
+        self->copy.finalize = ucc_tl_ucp_ec_copy_finalize;
+        tl_error(self->super.super.lib,
+                "not valid copy type: %d, using EC copy instead",
+                 self->cfg.local_copy_type);
+    };
 
     tl_debug(self->super.super.lib, "initialized tl context: %p", self);
     return UCC_OK;
@@ -564,6 +611,8 @@ ucc_status_t ucc_tl_ucp_get_context_attr(const ucc_base_context_t *context,
     size_t                packed_length;
     int                   i;
 
+    ucc_base_ctx_attr_clear(attr);
+
     if (attr->attr.mask & (UCC_CONTEXT_ATTR_FIELD_CTX_ADDR_LEN |
                            UCC_CONTEXT_ATTR_FIELD_CTX_ADDR)) {
         if (NULL == ctx->worker.worker_address) {
@@ -605,6 +654,7 @@ ucc_status_t ucc_tl_ucp_get_context_attr(const ucc_base_context_t *context,
         }
         attr->attr.ctx_addr_len = packed_length;
     }
+
     if (attr->attr.mask & UCC_CONTEXT_ATTR_FIELD_CTX_ADDR) {
         *offset = ctx->worker.ucp_addrlen;
         offset  = TL_UCP_EP_ADDR_WORKER(offset);
@@ -621,10 +671,13 @@ ucc_status_t ucc_tl_ucp_get_context_attr(const ucc_base_context_t *context,
             ucc_tl_ucp_ctx_remote_pack_data(ctx, offset);
         }
     }
+
     if (attr->attr.mask & UCC_CONTEXT_ATTR_FIELD_WORK_BUFFER_SIZE) {
         attr->attr.global_work_buffer_size =
             ONESIDED_SYNC_SIZE + ONESIDED_REDUCE_SIZE;
     }
+
     attr->topo_required = ctx->topo_required;
+
     return UCC_OK;
 }

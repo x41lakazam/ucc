@@ -4,32 +4,34 @@
  * See file LICENSE for terms.
  */
 
-#ifndef UCC_PT_BENCH_H
-#define UCC_PT_BENCH_H
-
-#include "ucc_pt_config.h"
-#include "ucc_pt_coll.h"
-#include "ucc_pt_comm.h"
-#include <ucc/api/ucc.h>
-
-class ucc_pt_benchmark {
-    ucc_pt_benchmark_config config;
-    ucc_pt_comm *comm;
-    ucc_pt_coll *coll;
-
-    void print_header();
-    void print_time(size_t count, ucc_pt_test_args_t args, double time);
-public:
-    ucc_pt_benchmark(ucc_pt_benchmark_config cfg, ucc_pt_comm *communicator);
-    ucc_status_t run_bench() noexcept;
-    ucc_status_t run_single_coll_test(ucc_coll_args_t args,
-                                      int nwarmup, int niter,
-                                      int n_inner_iter,
-                                      double &time) noexcept;
-    ucc_status_t run_single_executor_test(ucc_ee_executor_task_args_t args,
-                                          int nwarmup, int niter,
-                                          double &time) noexcept;
-    ~ucc_pt_benchmark();
-};
-
-#endif
+ #ifndef UCC_PT_BENCH_H
+ #define UCC_PT_BENCH_H
+ 
+ #include "ucc_pt_config.h"
+ #include "ucc_pt_coll.h"
+ #include "ucc_pt_comm.h"
+ #include <ucc/api/ucc.h>
+ 
+ class ucc_pt_benchmark {
+     ucc_pt_benchmark_config config;
+     ucc_pt_comm *comm;
+     ucc_pt_coll *coll;
+     int shuffle_cols;
+ 
+     void print_header();
+     void print_time(size_t count, ucc_pt_test_args_t args, double time, double avg_max_inner_time, float largest_rank);
+ public:
+     ucc_pt_benchmark(ucc_pt_benchmark_config cfg, ucc_pt_comm *communicator);
+     ucc_status_t run_bench() noexcept;
+     ucc_status_t run_single_coll_test(ucc_coll_args_t args,
+                                       int nwarmup, int niter,
+                                       double &time,
+                                       double &avg_max_inner_time,
+                                       float &largest_rank) noexcept;
+     ucc_status_t run_single_executor_test(ucc_ee_executor_task_args_t args,
+                                           int nwarmup, int niter,
+                                           double &time) noexcept;
+     ~ucc_pt_benchmark();
+ };
+ 
+ #endif
