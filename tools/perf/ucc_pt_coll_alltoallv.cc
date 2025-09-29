@@ -5,18 +5,20 @@
  */
 
  #include "ucc_pt_coll.h"
- #include "ucc_perftest.h"
- #include <ucc/api/ucc.h>
- #include <utils/ucc_math.h>
- #include <utils/ucc_coll_utils.h>
- #include <string>
- #include <fstream>
- #include <iostream>
- #include <dirent.h>
- #include <vector>
- #include <algorithm>
- #include <numeric>
- #include <random>
+#include "ucc_perftest.h"
+#include <ucc/api/ucc.h>
+#include <utils/ucc_math.h>
+#include <utils/ucc_coll_utils.h>
+#include <string>
+#include <fstream>
+#include <iostream>
+#include <dirent.h>
+#include <vector>
+#include <algorithm>
+#include <numeric>
+#include <random>
+#include <cstdlib>
+#include <cerrno>
  
  ucc_pt_coll_alltoallv::ucc_pt_coll_alltoallv(ucc_datatype_t dt,
                           ucc_memory_type mt, bool is_inplace,
@@ -157,13 +159,23 @@
  
  
  void shuffle_matrix(std::vector<std::vector<double>>& transfer_matrix, int iter){
-     // gets transposed matrix
-     // shuffle the columns using uniform seed so all ranks have the same shuffle    
-     std::default_random_engine rng(iter);
-     std::shuffle(transfer_matrix.begin(), transfer_matrix.end(), rng);
-     // transpose the matrix back and assign to the original matrix
-     transfer_matrix = transpose_transfer_matrix(transfer_matrix);
- }
+    // gets transposed matrix
+    // shuffle the columns using uniform seed so all ranks have the same shuffle
+    // Prefer a user-provided fixed seed if available, else fall back to iter
+    unsigned long base_seed = static_cast<unsigned long>(iter);
+    if (const char* env_seed = std::getenv("UCC_PT_SHUFFLE_SEED")) {
+        char* endptr = nullptr;
+        errno = 0;
+        unsigned long parsed = std::strtoul(env_seed, &endptr, 10);
+        if (errno == 0 && endptr && *endptr == '\0') {
+            base_seed = parsed + static_cast<unsigned long>(iter);
+        }
+    }
+    std::default_random_engine rng(static_cast<unsigned int>(base_seed));
+    std::shuffle(transfer_matrix.begin(), transfer_matrix.end(), rng);
+    // transpose the matrix back and assign to the original matrix
+    transfer_matrix = transpose_transfer_matrix(transfer_matrix);
+}
  
  
  void fill_transfer_matrix(std::vector<std::vector<double>>& transfer_matrix, std::string filename)
