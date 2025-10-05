@@ -86,7 +86,7 @@
      // Original bandwidth calculation for non-shuffle mode
      for (int i = 0; i < grsize; i++) {
          if (i == current_rank) {
-            std::cout << "skipping self" << std::endl;
+            //std::cout << "skipping self" << std::endl;
             continue; // skip self
          }
          src_size += ucc_coll_args_get_count(&args, args.src.info_v.counts, i);
@@ -96,8 +96,8 @@
      dst_size *= ucc_dt_size(args.dst.info_v.datatype);
      S = src_size > dst_size ? src_size : dst_size;
 
-     std::cout << "S: " << S << std::endl;
-     std::cout << "time_ms: " << time_ms << std::endl;
+     //std::cout << "S: " << S << std::endl;
+     //std::cout << "time_ms: " << time_ms << std::endl;
 
      //return (S / time_ms) * ((N - 1) / N) / 1000.0;
      return (S / time_ms) / 1000.0;
@@ -158,8 +158,21 @@
  
  void shuffle_matrix(std::vector<std::vector<double>>& transfer_matrix, int iter){
      // gets transposed matrix
-     // shuffle the columns using uniform seed so all ranks have the same shuffle    
-     std::default_random_engine rng(iter);
+     // shuffle the columns using uniform seed so all ranks have the same shuffle
+     int seed = iter;    
+     if (std::getenv("UCC_PT_COLL_ALLTOALLV_SET_SEED")) {
+        try {
+            seed = std::stoi(std::getenv("UCC_PT_COLL_ALLTOALLV_SET_SEED"));
+        } catch (const std::invalid_argument& e) {
+            std::cerr << "Warning: Invalid argument for seed in environment variable. Falling back to default.\n";
+            seed = iter;
+        } catch (const std::out_of_range& e) {
+            std::cerr << "Warning: Seed value in environment variable is out of range. Falling back to default.\n";
+            seed = iter;
+        }
+     }
+    
+     std::default_random_engine rng(seed);
      std::shuffle(transfer_matrix.begin(), transfer_matrix.end(), rng);
      // transpose the matrix back and assign to the original matrix
      transfer_matrix = transpose_transfer_matrix(transfer_matrix);
