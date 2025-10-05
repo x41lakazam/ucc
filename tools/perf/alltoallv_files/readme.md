@@ -85,7 +85,9 @@ Mismatch between file count and `*_COUNT` will result in an error.
 | `UCC_PT_COLL_INNER_LOG_FILE`                     | Path prefix for per-rank inner log files                          |
 | `UCC_TL_UCP_ALLTOALLV_PAIRWISE_NUM_POSTS`        | Max outstanding messages in pairwise algorithm                    |
 | `UCC_TL_UCP_TUNE=alltoallv:pairwise`             | Enable tuning for pairwise algorithm                              |
-| `UCC_TLS=ucp`                                     | Specifies UCP transport for the test                              |
+| `UCC_TLS=ucp`                                    | Specifies UCP transport for the test                              |
+| `UCC_PT_COLL_ALLTOALLV_SHUFFLE_COLS=0/1`         | Decide if to shuffle columns each iteration (1) or not (0 default)|
+| `UCC_PT_COLL_ALLTOALLV_SET_SEED=<int>`           | Set a seed when shuffling columns (optional)                      |
 
 > Additional UCX-related flags may be needed depending on cluster configuration. Refer to the [UCX GitHub repo](https://github.com/openucx/ucx) for details.
 
