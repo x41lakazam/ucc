@@ -93,6 +93,11 @@ ucc_status_t ucc_tl_mlx5_mcast_team_init(ucc_base_context_t *base_context,
 
     comm->allgather_comm.mcast_prepost_bucket_size
                                         = conf_params->mcast_prepost_bucket_size;
+<<<<<<< HEAD
+=======
+    comm->bcast_comm.mcast_prepost_bucket_size
+                                        = conf_params->mcast_prepost_bucket_size;
+>>>>>>> origin/master
     comm->allgather_comm.truly_zero_copy_allgather_enabled
                                         = conf_params->truly_zero_copy_allgather_enabled;
     comm->one_sided.reliability_enabled = conf_params->one_sided_reliability_enable;
@@ -100,11 +105,24 @@ ucc_status_t ucc_tl_mlx5_mcast_team_init(ucc_base_context_t *base_context,
                                         = conf_params->reliability_scheme_msg_threshold;
     comm->bcast_comm.wsize              = conf_params->wsize;
     comm->allgather_comm.max_push_send  = conf_params->max_push_send;
+<<<<<<< HEAD
     comm->max_eager                     = conf_params->max_eager;
     comm->cuda_mem_enabled              = conf_params->cuda_mem_enabled;
     comm->comm_id                       = team_params->id;
     comm->ctx                           = mcast_context;
     comm->mcast_group_count             = ucc_min(conf_params->mcast_group_count, MAX_GROUP_COUNT);
+=======
+    comm->bcast_comm.max_push_send      = conf_params->max_push_send;
+    comm->max_eager                     = conf_params->max_eager;
+    comm->truly_zero_copy_coll_min_msg  = conf_params->truly_zero_copy_coll_min_msg;
+    comm->cuda_mem_enabled              = conf_params->cuda_mem_enabled;
+    comm->comm_id                       = team_params->id;
+    comm->ctx                           = mcast_context;
+    comm->context                       = ctx;
+    comm->mcast_group_count             = ucc_min(conf_params->mcast_group_count, MAX_GROUP_COUNT);
+    comm->bcast_comm.truly_zero_copy_bcast_enabled
+                                        = conf_params->truly_zero_copy_bcast_enabled;
+>>>>>>> origin/master
 
     if (comm->cuda_mem_enabled && !(tl_ctx->supported_mem_types & UCC_BIT(UCC_MEMORY_TYPE_CUDA))) {
         tl_warn(mcast_context->lib, "cuda-aware mcast not available as gpu direct is not ready");
@@ -133,7 +151,11 @@ ucc_status_t ucc_tl_mlx5_mcast_team_init(ucc_base_context_t *base_context,
 
     comm->rank                  = team_params->rank;
     comm->commsize              = team_params->size;
+<<<<<<< HEAD
     comm->max_per_packet        = mcast_context->mtu - GRH_LENGTH;
+=======
+    comm->max_per_packet        = mcast_context->mtu;
+>>>>>>> origin/master
     comm->bcast_comm.last_acked = comm->bcast_comm.last_psn = 0;
     comm->bcast_comm.racks_n    = comm->bcast_comm.sacks_n  = 0;
     comm->bcast_comm.child_n    = comm->bcast_comm.parent_n = 0;
