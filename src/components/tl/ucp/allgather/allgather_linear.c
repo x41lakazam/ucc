@@ -34,8 +34,8 @@ ucc_status_t ucc_tl_ucp_allgather_linear_start(ucc_coll_task_t *coll_task)
 
     /* Copy local data to the receive buffer if not in-place */
     if (!UCC_IS_INPLACE(TASK_ARGS(task))) {
-        status = ctx->copy.post(PTR_OFFSET(rbuf, data_size * trank), rmem, NULL,
-                                sbuf, smem, NULL, data_size, task,
+        status = ctx->copy.post(PTR_OFFSET(rbuf, data_size * trank), rmem,
+                                sbuf, smem, data_size, task,
                                 &task->allgather_linear.copy_task);
         if (ucc_unlikely(UCC_OK != status)) {
             return status;
@@ -45,7 +45,7 @@ ucc_status_t ucc_tl_ucp_allgather_linear_start(ucc_coll_task_t *coll_task)
     return ucc_progress_queue_enqueue(UCC_TL_CORE_CTX(team)->pq, &task->super);
 }
 
-/* Get the number of requests in flight to be used for the allgather batched algorithm
+/* Get the number of requests in flight to be used for the allgather batched algorithm 
  * If the number of requests is not specified, use the number of team size - 1
  * If number of request is bigger than the team size - 1, use the team size - 1
  */
@@ -81,7 +81,7 @@ ucc_status_t ucc_tl_ucp_allgather_batched_init(
     task->super.post     = ucc_tl_ucp_allgather_linear_start;
     task->super.progress = ucc_tl_ucp_allgather_linear_progress;
     task->allgather_linear.nreqs =
-        nreqs == 0 ? UCC_TL_TEAM_SIZE(tl_team) - 1 : nreqs;
+        nreqs == UCC_ULUNITS_AUTO ? UCC_TL_TEAM_SIZE(tl_team) - 1 : nreqs;
     *task_h = &task->super;
 
     return UCC_OK;
@@ -93,9 +93,13 @@ ucc_tl_ucp_allgather_linear_batched_init(ucc_base_coll_args_t *coll_args,
                                          ucc_base_team_t      *team,
                                          ucc_coll_task_t     **task_h)
 {
-    return ucc_tl_ucp_allgather_batched_init(
-        coll_args, team, task_h,
-        get_num_reqs(ucc_derived_of(team, ucc_tl_ucp_team_t)));
+    unsigned long num_req =
+        get_num_reqs(ucc_derived_of(team, ucc_tl_ucp_team_t));
+    if (num_req == 0) {
+        ucc_error("ALLGATHER_BATCHED_NUM_POSTS needs to be more than 0");
+        return UCC_ERR_INVALID_PARAM;
+    }
+    return ucc_tl_ucp_allgather_batched_init(coll_args, team, task_h, num_req);
 }
 
 /* Linear One-Shot version of allgather */
@@ -103,8 +107,8 @@ ucc_status_t ucc_tl_ucp_allgather_linear_init(ucc_base_coll_args_t *coll_args,
                                               ucc_base_team_t      *team,
                                               ucc_coll_task_t     **task_h)
 {
-    // 0 means one-shot, team size - 1 request will be used
-    return ucc_tl_ucp_allgather_batched_init(coll_args, team, task_h, 0);
+    // UCC_ULUNITS_AUTO means one-shot, team size - 1 request will be used
+    return ucc_tl_ucp_allgather_batched_init(coll_args, team, task_h, UCC_ULUNITS_AUTO);
 }
 
 void ucc_tl_ucp_allgather_linear_progress(ucc_coll_task_t *coll_task)

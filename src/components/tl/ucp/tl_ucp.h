@@ -42,53 +42,44 @@ typedef struct ucc_tl_ucp_iface {
 /* Extern iface should follow the pattern: ucc_tl_<tl_name> */
 extern ucc_tl_ucp_iface_t ucc_tl_ucp;
 
-typedef enum ucc_tl_ucp_alltoall_onesided_alg_type {
-    UCC_TL_UCP_ALLTOALL_ONESIDED_PUT,
-    UCC_TL_UCP_ALLTOALL_ONESIDED_GET,
-    UCC_TL_UCP_ALLTOALL_ONESIDED_AUTO,
-    UCC_TL_UCP_ALLTOALL_ONESIDED_LAST
-} ucc_tl_ucp_alltoall_onesided_alg_t;
-
 typedef struct ucc_tl_ucp_lib_config {
-    ucc_tl_lib_config_t                super;
-    uint32_t                           kn_radix;
-    uint32_t                           fanin_kn_radix;
-    uint32_t                           fanout_kn_radix;
-    uint32_t                           barrier_kn_radix;
-    size_t                             allreduce_sliding_window_buf_size;
-    uint32_t                           allreduce_sliding_window_put_window_size;
-    uint32_t                           allreduce_sliding_window_num_get_bufs;
-    ucc_mrange_uint_t                  allreduce_kn_radix;
-    ucc_mrange_uint_t                  allreduce_sra_kn_radix;
-    uint32_t                           reduce_scatter_kn_radix;
-    ucc_mrange_uint_t                  allgather_kn_radix;
-    uint32_t                           bcast_kn_radix;
-    ucc_mrange_uint_t                  bcast_sag_kn_radix;
-    uint32_t                           reduce_kn_radix;
-    ucc_pipeline_params_t              reduce_srg_kn_pipeline;
-    ucc_mrange_uint_t                  reduce_srg_kn_radix;
-    uint32_t                           gather_kn_radix;
-    uint32_t                           gatherv_linear_num_posts;
-    uint32_t                           scatter_kn_radix;
-    ucc_on_off_auto_value_t            scatter_kn_enable_recv_zcopy;
-    uint32_t                           scatterv_linear_num_posts;
-    unsigned long                      alltoall_pairwise_num_posts;
-    unsigned long                      alltoallv_pairwise_num_posts;
-    unsigned long                      allgather_batched_num_posts;
-    ucc_pipeline_params_t              allreduce_sra_kn_pipeline;
-    int                                reduce_avg_pre_op;
-    int                                reduce_scatter_ring_bidirectional;
-    int                                reduce_scatterv_ring_bidirectional;
-    uint32_t                           alltoallv_hybrid_radix;
-    size_t                             alltoallv_hybrid_buff_size;
-    size_t                             alltoallv_hybrid_chunk_byte_limit;
-    uint32_t                           alltoallv_hybrid_num_scratch_sends;
-    uint32_t                           alltoallv_hybrid_num_scratch_recvs;
-    uint32_t                           alltoallv_hybrid_pairwise_num_posts;
-    ucc_ternary_auto_value_t           use_topo;
-    int                                use_reordering;
-    uint32_t                           alltoall_onesided_percent_bw;
-    ucc_tl_ucp_alltoall_onesided_alg_t alltoall_onesided_alg;
+    ucc_tl_lib_config_t      super;
+    uint32_t                 kn_radix;
+    uint32_t                 fanin_kn_radix;
+    uint32_t                 fanout_kn_radix;
+    uint32_t                 barrier_kn_radix;
+    size_t                   allreduce_sliding_window_buf_size;
+    uint32_t                 allreduce_sliding_window_put_window_size;
+    uint32_t                 allreduce_sliding_window_num_get_bufs;
+    ucc_mrange_uint_t        allreduce_kn_radix;
+    ucc_mrange_uint_t        allreduce_sra_kn_radix;
+    uint32_t                 reduce_scatter_kn_radix;
+    ucc_mrange_uint_t        allgather_kn_radix;
+    uint32_t                 bcast_kn_radix;
+    ucc_mrange_uint_t        bcast_sag_kn_radix;
+    uint32_t                 reduce_kn_radix;
+    ucc_pipeline_params_t    reduce_srg_kn_pipeline;
+    ucc_mrange_uint_t        reduce_srg_kn_radix;
+    uint32_t                 gather_kn_radix;
+    uint32_t                 gatherv_linear_num_posts;
+    uint32_t                 scatter_kn_radix;
+    ucc_on_off_auto_value_t  scatter_kn_enable_recv_zcopy;
+    uint32_t                 scatterv_linear_num_posts;
+    unsigned long            alltoall_pairwise_num_posts;
+    unsigned long            alltoallv_pairwise_num_posts;
+    unsigned long            allgather_batched_num_posts;
+    ucc_pipeline_params_t    allreduce_sra_kn_pipeline;
+    int                      reduce_avg_pre_op;
+    int                      reduce_scatter_ring_bidirectional;
+    int                      reduce_scatterv_ring_bidirectional;
+    uint32_t                 alltoallv_hybrid_radix;
+    size_t                   alltoallv_hybrid_buff_size;
+    size_t                   alltoallv_hybrid_chunk_byte_limit;
+    uint32_t                 alltoallv_hybrid_num_scratch_sends;
+    uint32_t                 alltoallv_hybrid_num_scratch_recvs;
+    uint32_t                 alltoallv_hybrid_pairwise_num_posts;
+    ucc_ternary_auto_value_t use_topo;
+    int                      use_reordering;
 } ucc_tl_ucp_lib_config_t;
 
 typedef enum ucc_tl_ucp_local_copy_type {
@@ -109,7 +100,6 @@ typedef struct ucc_tl_ucp_context_config {
     uint32_t                     service_throttling_thresh;
     ucc_tl_ucp_local_copy_type_t local_copy_type;
     int                          memtype_copy_enable;
-    uint32_t                     exported_memory_handle;
 } ucc_tl_ucp_context_config_t;
 
 typedef ucc_tl_ucp_lib_config_t ucc_tl_ucp_team_config_t;
@@ -130,13 +120,6 @@ typedef struct ucc_tl_ucp_remote_info {
     size_t packed_key_len;
 } ucc_tl_ucp_remote_info_t;
 
-typedef struct ucc_tl_ucp_memh_data {
-    ucc_tl_ucp_remote_info_t rinfo;
-    void                    *packed_memh;
-    size_t                   packed_memh_len;
-    ucp_rkey_h               rkey;
-} ucc_tl_ucp_memh_data_t;
-
 typedef struct ucc_tl_ucp_worker {
     ucp_context_h     ucp_context;
     ucp_worker_h      ucp_worker;
@@ -152,10 +135,23 @@ typedef union ucc_tl_ucp_copy_task ucc_tl_ucp_copy_task_t;
 
 typedef ucc_status_t (*ucc_tl_ucp_copy_post_fn_t)(void *dst,
                                                   ucc_memory_type_t dst_mtype,
-                                                  ucp_mem_h dst_memh,
                                                   void *src,
                                                   ucc_memory_type_t src_mtype,
-                                                  ucp_mem_h src_memh,
+                                                  size_t size,
+                                                  ucc_tl_ucp_task_t *coll_task,
+                                                  ucc_tl_ucp_copy_task_t **copy_task);
+typedef ucc_status_t (*ucc_tl_ucp_copy_test_fn_t)(ucc_tl_ucp_context_t *ctx,
+                                                  ucc_tl_ucp_copy_task_t *copy_task);
+typedef ucc_status_t (*ucc_tl_ucp_copy_finalize_fn_t)(ucc_tl_ucp_copy_task_t *copy_task);
+
+typedef struct ucc_tl_ucp_task ucc_tl_ucp_task_t;
+typedef struct ucc_tl_ucp_context ucc_tl_ucp_context_t;
+typedef union ucc_tl_ucp_copy_task ucc_tl_ucp_copy_task_t;
+
+typedef ucc_status_t (*ucc_tl_ucp_copy_post_fn_t)(void *dst,
+                                                  ucc_memory_type_t dst_mtype,
+                                                  void *src,
+                                                  ucc_memory_type_t src_mtype,
                                                   size_t size,
                                                   ucc_tl_ucp_task_t *coll_task,
                                                   ucc_tl_ucp_copy_task_t **copy_task);
@@ -205,22 +201,16 @@ typedef ucc_status_t (*ucc_tl_ucp_send_nz_fn_t)(void *buffer, size_t msglen,
                                                 ucc_tl_ucp_team_t *team,
                                                 ucc_tl_ucp_task_t *task);
 
-typedef void (*ucc_tl_ucp_send_recv_counter_inc_fn_t)(uint32_t *counter);
-
 typedef struct ucc_tl_ucp_context {
     ucc_tl_context_t            super;
     ucc_tl_ucp_context_config_t cfg;
-    ucc_thread_mode_t           thread_mode;
     ucc_tl_ucp_worker_t         worker;
     ucc_tl_ucp_worker_t         service_worker;
     struct {
-        ucc_tl_ucp_send_nb_fn_t               ucc_tl_ucp_send_nb;
-        ucc_tl_ucp_recv_nb_fn_t               ucc_tl_ucp_recv_nb;
-        ucc_tl_ucp_send_nz_fn_t               ucc_tl_ucp_send_nz;
-        ucc_tl_ucp_recv_nz_fn_t               ucc_tl_ucp_recv_nz;
-        ucp_send_nbx_callback_t               send_cb;
-        ucp_tag_recv_nbx_callback_t           recv_cb;
-        ucc_tl_ucp_send_recv_counter_inc_fn_t p2p_counter_inc;
+        ucc_tl_ucp_send_nb_fn_t ucc_tl_ucp_send_nb;
+        ucc_tl_ucp_recv_nb_fn_t ucc_tl_ucp_recv_nb;
+        ucc_tl_ucp_send_nz_fn_t ucc_tl_ucp_send_nz;
+        ucc_tl_ucp_recv_nz_fn_t ucc_tl_ucp_recv_nz;
     } sendrecv_cbs;
     uint32_t                    service_worker_throttling_count;
     ucc_mpool_t                 req_mp;
@@ -237,7 +227,7 @@ typedef struct ucc_tl_ucp_context {
 } ucc_tl_ucp_context_t;
 UCC_CLASS_DECLARE(ucc_tl_ucp_context_t, const ucc_base_context_params_t *,
                     const ucc_base_config_t *);
-
+  
 extern ucc_config_field_t ucc_tl_ucp_lib_config_table[];
 
 #define UCC_TL_UCP_SUPPORTED_COLLS                                             \
@@ -277,33 +267,6 @@ extern ucc_config_field_t ucc_tl_ucp_lib_config_table[];
 
 #define UCC_TL_UCP_REMOTE_RKEY(_ctx, _rank, _seg)                              \
     ((_ctx)->rkeys[_rank * _ctx->n_rinfo_segs + _seg])
-
-/*
- * For context, the data order of the MEMH Headers / Packed Headers
- *
- * MEMH headers for each TL:
- * TL NAME (8 bytes) | packed size | packed TL
- *
- * Packed TL headers:
- * packed_key_size | packed_memh_size | packed_key | packed_memh
- */
-#define UCC_TL_UCP_MEMH_TL_HEADERS        2
-
-#define UCC_TL_UCP_MEMH_TL_PACKED_HEADERS 2
-
-#define UCC_TL_UCP_MEMH_TL_HEADER_SIZE                                         \
-    (sizeof(size_t) * UCC_TL_UCP_MEMH_TL_HEADERS)
-
-#define UCC_TL_UCP_MEMH_TL_PACKED_HEADER_SIZE                                  \
-    (sizeof(size_t) *                                                          \
-     (UCC_TL_UCP_MEMH_TL_HEADERS + UCC_TL_UCP_MEMH_TL_PACKED_HEADERS))
-
-#define UCC_TL_UCP_MEMH_TL_KEY_SIZE(buffer)                                    \
-    (*(size_t *)(PTR_OFFSET(buffer, UCC_TL_UCP_MEMH_TL_HEADER_SIZE)))
-
-#define UCC_TL_UCP_MEMH_TL_PACKED_MEMH(buffer)                                 \
-    (PTR_OFFSET(buffer, UCC_TL_UCP_MEMH_TL_PACKED_HEADER_SIZE +                \
-                            UCC_TL_UCP_MEMH_TL_KEY_SIZE(buffer)))
 
 extern ucs_memory_type_t ucc_memtype_to_ucs[UCC_MEMORY_TYPE_LAST+1];
 

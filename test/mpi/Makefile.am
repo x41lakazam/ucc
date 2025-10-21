@@ -28,8 +28,7 @@ ucc_test_mpi_SOURCES = \
 	test_gather.cc          \
 	test_gatherv.cc         \
 	test_scatter.cc         \
-	test_scatterv.cc        \
-	test_mem_map.cc
+	test_scatterv.cc
 
 CXX=$(MPICXX)
 LD=$(MPICXX)

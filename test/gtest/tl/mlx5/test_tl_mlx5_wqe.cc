@@ -39,9 +39,14 @@ UCC_TEST_P(test_tl_mlx5_transpose, transposeWqe)
     struct ibv_wc  wcs[1];
     struct ibv_mr *src_mr, *dst_mr;
     int            i, j, k;
+    struct ibv_device_attr device_attr;
 
-    if (!is_cx7_vendor_id()) {
-        GTEST_SKIP() << "The test needs CX7";
+    GTEST_ASSERT_EQ(ibv_query_device(ctx, &device_attr), 0);
+    // Check for Mellanox/NVIDIA vendor ID (0x02c9) and CX7 (MT4129) vendor_part_id
+    if (device_attr.vendor_id != 0x02c9 || device_attr.vendor_part_id != 4129) {
+        GTEST_SKIP() << "The test needs CX7 but got vendor_id="
+                     << device_attr.vendor_id
+                     << ", vendor_part_id=" << device_attr.vendor_part_id;
     }
 
     // Skips if do not match HW limitations
@@ -268,10 +273,6 @@ UCC_TEST_P(test_tl_mlx5_wait_on_data, waitOnDataWqe)
     struct ibv_sge     sg;
     struct ibv_send_wr wr;
 
-    if (!is_cx7_vendor_id()) {
-        GTEST_SKIP() << "The test needs CX7";
-    }
-
     memset(buffer, 0, 3 * sizeof(uint64_t));
     buffer_mr = ibv_reg_mr(pd, buffer, 3 * sizeof(uint64_t),
                            IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
@@ -342,13 +343,13 @@ UCC_TEST_P(test_tl_mlx5_umr_wqe, umrWqe)
     int      src_size              = (bytes_count + bytes_skip) * repeat_count;
     int      dst_size              = bytes_count * nbr_srcs * repeat_count;
     int      send_mem_access_flags = 0;
-    void    *umr_entries_buf       = nullptr;
-    int      recv_mem_access_flags = IBV_ACCESS_LOCAL_WRITE |
-                                     IBV_ACCESS_REMOTE_WRITE;
+    int      recv_mem_access_flags =
+        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE;
     DT                           src[nbr_srcs][src_size], dst[dst_size];
     struct ibv_mr *              src_mr[nbr_srcs], *dst_mr, *umr_entries_mr;
     struct mlx5dv_mkey *         umr_mkey;
     struct mlx5dv_mkey_init_attr umr_mkey_init_attr;
+    void *                       umr_entries_buf;
     size_t                       umr_buf_size;
     struct mlx5dv_mr_interleaved mkey_entries[nbr_srcs];
     struct ibv_wc                wcs[1];

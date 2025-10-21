@@ -51,7 +51,7 @@ static inline ucc_status_t find_leader_rank(ucc_base_team_t *team,
     ucc_rank_t         *node_leaders = NULL;
     ucc_status_t        status;
 
-    ucc_assert(team_rank < UCC_CL_TEAM_SIZE(cl_team));
+    ucc_assert(team_rank >= 0 && team_rank < UCC_CL_TEAM_SIZE(cl_team));
     ucc_assert(SBGP_EXISTS(cl_team, NODE_LEADERS));
 
     status = ucc_topo_get_node_leaders(core_team->topo, &node_leaders);
@@ -64,54 +64,58 @@ static inline ucc_status_t find_leader_rank(ucc_base_team_t *team,
     return UCC_OK;
 }
 
-/* Check if the ranks are block ordered. If they aren't, we'll need to
+/* Check if the ranks are block ordered. If they aren't, we'll need to 
    unpack the data after the allgatherv into the right position, even if the
    dst buffer is contiguous */
 static inline ucc_status_t is_block_ordered(ucc_cl_hier_team_t *cl_team, int *ordered)
 {
-    ucc_topo_t  *topo             = cl_team->super.super.params.team->topo;
-    ucc_sbgp_t  *all_nodes        = NULL;
-    int          is_block_ordered = 1;
-    int          n_nodes;
-    ucc_status_t status;
-    ucc_rank_t   prev_rank, curr_rank;
-    ucc_rank_t   i, j;
+    ucc_topo_t *topo = cl_team->super.super.params.team->topo;
+    ucc_sbgp_t *sbgp;
+    int         is_block_ordered;
 
     if (cl_team->is_block_ordered != -1) {
         is_block_ordered = cl_team->is_block_ordered;
     } else {
-        status = ucc_topo_get_all_nodes(topo, &all_nodes, &n_nodes);
-        if (status != UCC_OK) {
-            return status;
-        }
-
-        // For each node, check if its ranks are consecutive in team order
-        for (i = 0; i < n_nodes; i++) {
-            if (all_nodes[i].status == UCC_SBGP_ENABLED
-                && all_nodes[i].group_size > 1) {
-                // Get first rank in this node
-                prev_rank = ucc_ep_map_eval(all_nodes[i].map, 0);
-
-                // Check if all other ranks are consecutive
-                for (j = 1; j < all_nodes[i].group_size; j++) {
-                    curr_rank = ucc_ep_map_eval(all_nodes[i].map, j);
-
-                    // If ranks are not consecutive, not block ordered
-                    if (curr_rank != prev_rank + 1) {
-                        is_block_ordered = 0;
-                        goto break_outer;
-                    }
-                    prev_rank = curr_rank;
-                }
-            }
-        }
-
-break_outer:
-        // Save for next time
+        sbgp = ucc_topo_get_sbgp(topo, UCC_SBGP_FULL_HOST_ORDERED);
+        is_block_ordered = ucc_ep_map_is_identity(&sbgp->map) ? 1 : 0;
         cl_team->is_block_ordered = is_block_ordered;
     }
 
     *ordered = is_block_ordered;
+
+    return UCC_OK;
+}
+
+/* Node leader subgroup is always ordered by ascending host_id. If the team's ranks are
+   not in the same order, then node leader subgroup allgatherv won't be enough, we'll
+   have to use a staging buffer and unpack to reorder each leader's contribution.
+   So, this func will check that the team ranks in the ldr sbgp are ascending */
+static inline ucc_status_t is_host_ordered(ucc_cl_hier_team_t *cl_team, int *ordered)
+{
+    int         is_host_ordered;
+    ucc_rank_t  max_rank, i, team_rank;
+
+    if (cl_team->is_host_ordered != -1) {
+        is_host_ordered = cl_team->is_host_ordered;
+    } else {
+        if (SBGP_EXISTS(cl_team, NODE_LEADERS)) {
+            is_host_ordered = 1;
+            max_rank = ucc_ep_map_eval(SBGP_MAP(cl_team, NODE_LEADERS), 0);
+            for (i = 1; i < SBGP_SIZE(cl_team, NODE_LEADERS); i++) {
+                team_rank = ucc_ep_map_eval(SBGP_MAP(cl_team, NODE_LEADERS), i);
+                if (team_rank < max_rank) {
+                    is_host_ordered = 0;
+                    break;
+                }
+                max_rank = team_rank;
+            }
+        } else {
+            is_host_ordered = 1;
+        }
+        cl_team->is_host_ordered = is_host_ordered;
+    }
+
+    *ordered = is_host_ordered;
 
     return UCC_OK;
 }
@@ -157,7 +161,7 @@ UCC_CL_HIER_PROFILE_FUNC(ucc_status_t, ucc_cl_hier_allgatherv_init,
     ucc_rank_t              team_rank;
     size_t                  leader_old_count;
     size_t                  add_count, new_count;
-    int                     block_ordered;
+    int                     block_ordered, host_ordered;
     int                     ldr_sbgp_only;
 
     memcpy(&args,     coll_args, sizeof(args));
@@ -179,11 +183,11 @@ UCC_CL_HIER_PROFILE_FUNC(ucc_status_t, ucc_cl_hier_allgatherv_init,
 
     n_tasks   = 0;
     UCC_CHECK_GOTO(is_block_ordered(cl_team, &block_ordered), free_sched, status);
-    is_contig = block_ordered && ucc_coll_args_is_disp_contig(&args.args, team_size);
-
+    UCC_CHECK_GOTO(is_host_ordered(cl_team, &host_ordered), free_sched, status);
+    is_contig = block_ordered && host_ordered && ucc_coll_args_is_disp_contig(&args.args, team_size);
     /* handle the case where this rank may be the only one on this node */
     ldr_sbgp_only = !SBGP_ENABLED(cl_team, NODE) && SBGP_ENABLED(cl_team, NODE_LEADERS);
-
+    
     UCC_CHECK_GOTO(ucc_schedule_init(schedule, &args, team), free_sched, status);
 
     node_counts_size   = node_sbgp_size * sizeof(ucc_count_t);
@@ -286,7 +290,7 @@ UCC_CL_HIER_PROFILE_FUNC(ucc_status_t, ucc_cl_hier_allgatherv_init,
                                             &args.args,
                                             args.args.dst.info_v.displacements,
                                             rank));
-                args.args.src.info.count    =
+                args.args.src.info.count    = 
                     ucc_coll_args_get_count(&args.args,
                                             args.args.dst.info_v.counts,
                                             rank);
@@ -370,7 +374,7 @@ UCC_CL_HIER_PROFILE_FUNC(ucc_status_t, ucc_cl_hier_allgatherv_init,
             args.args.src.info_v.datatype = args.args.dst.info_v.datatype;
             args.args.src.info_v.mem_type = args.args.dst.info_v.mem_type;
             args.args.src.info_v.buffer   = buffer;
-
+            
             // Pass leader_disps and leader_counts through src.info_v for unpack
             args.args.src.info_v.displacements = leader_disps;
             args.args.src.info_v.counts        = leader_counts;

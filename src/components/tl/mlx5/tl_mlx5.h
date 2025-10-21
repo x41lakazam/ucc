@@ -43,7 +43,6 @@ typedef struct ucc_tl_mlx5_iface {
 extern ucc_tl_mlx5_iface_t ucc_tl_mlx5;
 
 typedef struct ucc_tl_mlx5_ib_qp_conf {
-    uint8_t             qp_sl;
     uint32_t            qp_rnr_retry;
     uint32_t            qp_rnr_timer;
     uint32_t            qp_retry_cnt;
@@ -138,7 +137,6 @@ typedef enum
     TL_MLX5_TEAM_STATE_MCAST_GRP_JOIN_READY,
     TL_MLX5_TEAM_STATE_MCAST_GRP_JOIN_FAILED,
     TL_MLX5_TEAM_STATE_MCAST_GRP_BCAST_POST,
-    TL_MLX5_TEAM_STATE_MCAST_RELIAB_SYNC,
     TL_MLX5_TEAM_STATE_MCAST_RELIABLITY,
     TL_MLX5_TEAM_STATE_MCAST_READY,
     TL_MLX5_TEAM_STATE_MCAST_NOT_AVAILABLE

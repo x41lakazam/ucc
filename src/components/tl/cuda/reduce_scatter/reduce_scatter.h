@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See file LICENSE for terms.
  */
@@ -15,9 +15,6 @@ enum
     UCC_TL_CUDA_REDUCE_SCATTER_ALG_AUTO,
     UCC_TL_CUDA_REDUCE_SCATTER_ALG_RING,
     UCC_TL_CUDA_REDUCE_SCATTER_ALG_LINEAR,
-#ifdef HAVE_NVLS
-    UCC_TL_CUDA_REDUCE_SCATTER_ALG_NVLS,
-#endif /* HAVE_NVLS */
     UCC_TL_CUDA_REDUCE_SCATTER_ALG_LAST
 };
 
@@ -43,11 +40,6 @@ ucc_status_t ucc_tl_cuda_reduce_scatter_ring_init(ucc_base_coll_args_t *coll_arg
 ucc_status_t ucc_tl_cuda_reduce_scatter_linear_init(ucc_base_coll_args_t *coll_args,
                                                     ucc_base_team_t *     tl_team,
                                                     ucc_coll_task_t **    task_p);
-#ifdef HAVE_NVLS
-ucc_status_t ucc_tl_cuda_reduce_scatter_nvls_init(ucc_base_coll_args_t *coll_args,
-                                                  ucc_base_team_t *     tl_team,
-                                                  ucc_coll_task_t **    task_p);
-#endif /* HAVE_NVLS */
 
 static inline int ucc_tl_cuda_reduce_scatter_alg_from_str(const char *str)
 {

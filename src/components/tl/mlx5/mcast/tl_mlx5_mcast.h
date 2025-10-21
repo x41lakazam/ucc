@@ -125,7 +125,6 @@ typedef struct ucc_tl_mlx5_mcast_coll_comm_init_spec {
     int                               truly_zero_copy_bcast_enabled;
     int                               truly_zero_copy_coll_min_msg;
     int                               mcast_prepost_bucket_size;
-    int                               hca_copy_enabled;
     void                             *oob;
 } ucc_tl_mlx5_mcast_coll_comm_init_spec_t;
 
@@ -157,12 +156,12 @@ typedef struct ucc_tl_mlx5_mcast_rcache_region {
 } ucc_tl_mlx5_mcast_rcache_region_t;
 
 typedef struct ucc_tl_mlx5_mcast_ctx_params {
-    ucc_ternary_auto_value_t        mcast_enabled;
-    char                           *ib_dev_name;
-    int                             print_nack_stats;
-    int                             timeout;
-    int                             mcast_bcast_enabled;
-    int                             mcast_allgather_enabled;
+    int      mcast_enabled;
+    char    *ib_dev_name;
+    int      print_nack_stats;
+    int      timeout;
+    uint8_t  mcast_bcast_enabled;
+    uint8_t  mcast_allgather_enabled;
 } ucc_tl_mlx5_mcast_ctx_params_t;
 
 typedef struct ucc_tl_mlx5_mcast_coll_context {
@@ -192,14 +191,14 @@ typedef struct ucc_tl_mlx5_mcast_join_info_t {
 } ucc_tl_mlx5_mcast_join_info_t;
 
 typedef struct ucc_tl_mlx5_mcast_context {
-    ucc_thread_mode_t                   tm;
-    ucc_tl_mlx5_mcast_coll_context_t    mcast_context;
-    ucc_tl_mlx5_mcast_context_config_t  cfg;
-    ucc_ternary_auto_value_t            mcast_enabled;
-    int                                 mcast_ctx_ready;
-    ucc_tl_mlx5_mcast_oob_ctx_t         oob_ctx;
-    int                                 mcast_bcast_enabled;
-    int                                 mcast_allgather_enabled;
+    ucc_thread_mode_t                  tm;
+    ucc_tl_mlx5_mcast_coll_context_t   mcast_context;
+    ucc_tl_mlx5_mcast_context_config_t cfg;
+    int                                mcast_enabled;
+    int                                mcast_ctx_ready;
+    ucc_tl_mlx5_mcast_oob_ctx_t        oob_ctx;
+    uint8_t                            mcast_bcast_enabled;
+    uint8_t                            mcast_allgather_enabled;
 } ucc_tl_mlx5_mcast_context_t;
 
 struct pp_packet {
@@ -280,17 +279,15 @@ typedef struct ucc_tl_mlx5_mcast_one_sided_reliability_comm {
     int                                          reliability_enabled;
     int                                          reliability_ready;
     int                                          pending_reads;
-    int                                          hca_copy_enabled;
     enum ucc_tl_mlx5_mcast_one_sided_slot_states slots_state;
     ucc_tl_mlx5_mcast_per_qp_posted_recv_info_t  posted_recv[MAX_GROUP_COUNT];
 } ucc_tl_mlx5_mcast_one_sided_reliability_comm_t;
 
 typedef struct ucc_tl_mlx5_mcast_service_coll {
-    ucc_status_t (*bcast_post)      (void*, void*, size_t, ucc_rank_t, ucc_service_coll_req_t**);
-    ucc_status_t (*allgather_post)  (void*, void*, void*, size_t, ucc_service_coll_req_t**);
-    ucc_status_t (*allreduce_post)  (void*, void*, void*, size_t, ucc_datatype_t, ucc_reduction_op_t, ucc_service_coll_req_t**);
-    ucc_status_t (*barrier_post)    (void*, ucc_service_coll_req_t**);
-    ucc_status_t (*coll_test)       (ucc_service_coll_req_t*);
+    ucc_status_t (*bcast_post) (void*, void*, size_t, ucc_rank_t, ucc_service_coll_req_t**);
+    ucc_status_t (*allgather_post) (void*, void*, void*, size_t, ucc_service_coll_req_t**);
+    ucc_status_t (*barrier_post) (void*, ucc_service_coll_req_t**);
+    ucc_status_t (*coll_test) (ucc_service_coll_req_t*);
 } ucc_tl_mlx5_mcast_service_coll_t;
 
 typedef struct ucc_tl_mlx5_mcast_allgather_comm {
@@ -360,9 +357,6 @@ typedef struct ucc_tl_mlx5_mcast_coll_comm {
     int                                             cuda_mem_enabled;
     ucc_tl_mlx5_mcast_join_info_t                  *group_setup_info;
     ucc_service_coll_req_t                         *group_setup_info_req;
-    int                                             mcast_transport_ready;
-    int                                             transport_ready_global;
-    ucc_service_coll_req_t                         *transport_ready_req;
     ucc_tl_mlx5_mcast_service_coll_t                service_coll;
     struct rdma_cm_event                           *event;
     ucc_tl_mlx5_mcast_one_sided_reliability_comm_t  one_sided;
@@ -371,9 +365,6 @@ typedef struct ucc_tl_mlx5_mcast_coll_comm {
     ucc_tl_mlx5_mcast_bcast_comm_t                  bcast_comm;
     uint32_t                                        truly_zero_copy_coll_min_msg;
     ucc_tl_mlx5_mcast_context_t                    *context;
-    /* Dedicated HCA copy resources - separate from mcast operations */
-    struct ibv_cq                                  *hca_copy_cq;  /* Dedicated CQ for HCA copy */
-    struct ibv_qp                                  *hca_copy_qp;  /* Dedicated QP for HCA copy */
     struct pp_packet                               *r_window[1]; // note: do not add any new variable after here
 } ucc_tl_mlx5_mcast_coll_comm_t;
 
@@ -476,10 +467,6 @@ typedef struct ucc_tl_mlx5_mcast_coll_req {
     ucc_ee_executor_task_t                             *exec_task;
     ucc_coll_task_t                                    *coll_task;
     ucc_status_t (*progress)                           (void *req);
-    /* Scratch buffer for efficient CUDA memory assembly */
-    char                                               *scratch_buf;
-    ucc_mc_buffer_header_t                             *scratch_buf_header;
-    int                                                 scratch_packets_received;
 } ucc_tl_mlx5_mcast_coll_req_t;
 
 typedef struct ucc_tl_mlx5_mcast_oob_p2p_context {
@@ -495,7 +482,7 @@ typedef struct ucc_tl_mlx5_mcast_oob_p2p_context {
 static inline struct pp_packet* ucc_tl_mlx5_mcast_buf_get_free(ucc_tl_mlx5_mcast_coll_comm_t* comm)
 {
     struct pp_packet* pp;
-
+    
     pp = ucc_list_extract_head(&comm->bpool, struct pp_packet, super);
 
     ucc_assert(pp == NULL || pp->context == 0);
@@ -523,7 +510,8 @@ static inline ucc_status_t ucc_tl_mlx5_mcast_post_recv_buffers(ucc_tl_mlx5_mcast
     count_per_qp = count / comm->mcast_group_count;
     for (i = 0; i < count_per_qp; i++) {
         if (NULL == (pp = ucc_tl_mlx5_mcast_buf_get_free(comm))) {
-            break;
+            tl_error(comm->lib, "not enought free pp packets to cover the entire message");
+            return UCC_ERR_NO_RESOURCE;
         }
         rwr[i].wr_id = ((uint64_t) pp);
         rwr[i].next = &rwr[i+1];
@@ -539,7 +527,8 @@ static inline ucc_status_t ucc_tl_mlx5_mcast_post_recv_buffers(ucc_tl_mlx5_mcast
                     errno, 0, i);
             return UCC_ERR_NO_RESOURCE;
         }
-        comm->pending_recv += i;
+        comm->pending_recv                  += i;
+        comm->pending_recv_per_qp[group_id] += i;
     }
 
     return UCC_OK;
@@ -646,15 +635,4 @@ ucc_status_t ucc_tl_mlx5_mcast_context_init(ucc_tl_mlx5_mcast_context_t *mcast_c
 
 
 ucc_status_t ucc_tl_mlx5_mcast_clean_ctx(ucc_tl_mlx5_mcast_coll_context_t *ctx);
-
-/* Conditional logging macro for mcast operations */
-#define tl_mlx5_mcast_log(_mcast_enabled, _lib, _intended_level, _fmt, ...) \
-    do { \
-        if ((_mcast_enabled) == UCC_YES) { \
-            ucc_log_component((_intended_level), (_lib)->log_component, (_fmt), ##__VA_ARGS__); \
-        } else if ((_mcast_enabled) == UCC_TRY) { \
-            ucc_log_component(UCC_LOG_LEVEL_DEBUG, (_lib)->log_component, (_fmt), ##__VA_ARGS__); \
-        } \
-    } while(0)
-
 #endif

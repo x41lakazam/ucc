@@ -12,7 +12,6 @@
 #include "utils/ucc_log.h"
 #include "utils/ucc_list.h"
 #include "utils/ucc_string.h"
-#include "utils/ucc_debug.h"
 #include "ucc_progress_queue.h"
 
 static uint32_t ucc_context_seq_num = 0;
@@ -50,16 +49,6 @@ static ucc_config_field_t ucc_context_config_table[] = {
      "Throttle UCC progress to every <n>th invocation",
      ucc_offsetof(ucc_context_config_t, throttle_progress),
      UCC_CONFIG_TYPE_UINT},
-
-    {"NET_DEVICES", "all",
-     "Specifies which network device(s) to use. The order is not meaningful.\n"
-     "\"all\" would use all available devices. Only TLs that support this "
-     "parameter will be affected. The parameter is only supported by UCX TL.",
-     ucc_offsetof(ucc_context_config_t, net_devices), UCC_CONFIG_TYPE_STRING_ARRAY},
-
-    {"NODE_LOCAL_ID", "auto",
-     "An optimization hint for the local identificator on a single node.",
-     ucc_offsetof(ucc_context_config_t, node_local_id), UCC_CONFIG_TYPE_ULUNITS},
 
     {NULL}};
 UCC_CONFIG_REGISTER_TABLE(ucc_context_config_table, "UCC context", NULL,
@@ -313,8 +302,6 @@ void ucc_context_config_release(ucc_context_config_t *config)
     for (i = 0; i < config->n_cl_cfg; i++) {
         ucc_base_config_release(&config->cl_cfgs[i]->super.super);
     }
-
-    ucc_config_parser_release_opts(config, ucc_context_config_table);
     ucc_free(config->tl_cfgs);
     ucc_free(config->cl_cfgs);
     ucc_free(config);
@@ -632,9 +619,6 @@ ucc_status_t ucc_context_create_proc_info(ucc_lib_h                   lib,
         status = UCC_ERR_NO_MEMORY;
         goto error;
     }
-    ctx->net_devices.count = 0;
-    ucc_config_names_array_dup(&ctx->net_devices, &config->net_devices);
-
     ctx->throttle_progress = config->throttle_progress;
     ctx->rank              = UCC_RANK_MAX;
     ctx->lib               = lib;
@@ -645,14 +629,10 @@ ucc_status_t ucc_context_create_proc_info(ucc_lib_h                   lib,
     b_params.context           = ctx;
     b_params.estimated_num_eps = config->estimated_num_eps;
     b_params.estimated_num_ppn = config->estimated_num_ppn;
-    b_params.node_local_id     = config->node_local_id;
     b_params.prefix            = lib->full_prefix;
     b_params.thread_mode       = lib->attr.thread_mode;
     if (params->mask & UCC_CONTEXT_PARAM_FIELD_OOB) {
         ctx->rank = params->oob.oob_ep;
-#ifdef ENABLE_DEBUG
-        ucc_check_wait_for_debugger(ctx->rank);
-#endif
     }
     status = ucc_create_tl_contexts(ctx, config, b_params);
     if (UCC_OK != status) {
@@ -743,9 +723,7 @@ ucc_status_t ucc_context_create_proc_info(ucc_lib_h                   lib,
             status = ucc_core_addr_exchange(ctx, &ctx->params.oob,
                                             &ctx->addr_storage);
             if (status < 0) {
-                ucc_error("failed to exchange addresses during context "
-                          "creation with status: %s",
-                          ucc_status_string(status));
+                ucc_error("failed to exchange addresses during context creation");
                 goto error_ctx_create;
             }
         } while (status == UCC_INPROGRESS);
@@ -802,8 +780,7 @@ ucc_status_t ucc_context_create_proc_info(ucc_lib_h                   lib,
                              ->team.create_post(&ctx->service_ctx->super,
                                                 &t_params, &b_team);
                 if (UCC_OK != status) {
-                    ucc_error("ctx service team create post failed with status: %s",
-                              ucc_status_string(status));
+                    ucc_error("ctx service team create post failed");
                     goto error_ctx_create;
                 }
                 do {
@@ -811,8 +788,7 @@ ucc_status_t ucc_context_create_proc_info(ucc_lib_h                   lib,
                                  ->team.create_test(b_team);
                 } while (UCC_INPROGRESS == status);
                 if (status < 0) {
-                    ucc_error("failed to create ctx service team with status: %s",
-                              ucc_status_string(status));
+                    ucc_error("failed to create ctx service team");
                     goto error_ctx_create;
                 }
                 ctx->service_team = ucc_derived_of(b_team, ucc_tl_team_t);
@@ -834,11 +810,11 @@ ucc_status_t ucc_context_create_proc_info(ucc_lib_h                   lib,
                 created_ctx_counter++;
             } else {
                 if (ucc_tl_is_required(lib, tl_lib->iface, 1)) {
-                    ucc_error("ctx create epilog for %s failed with status: %s",
+                    ucc_error("ctx create epilog for %s failed: %s",
                               tl_lib->iface->super.name, ucc_status_string(status));
                     goto error_ctx_create_epilog;
                 } else {
-                    ucc_debug("ctx create epilog for %s failed with status: %s",
+                    ucc_debug("ctx create epilog for %s failed: %s",
                               tl_lib->iface->super.name, ucc_status_string(status));
                     tl_lib->iface->context.destroy(&tl_ctx->super);
                     for (j = 0; j < ctx->n_cl_ctx; j++) {
@@ -860,13 +836,7 @@ ucc_status_t ucc_context_create_proc_info(ucc_lib_h                   lib,
         goto error_ctx_create_epilog;
     }
 
-    ucc_debug("created ucc context %p for lib %s: type %s, thread mode %s, oob %s, num eps %d, num ppn %d",
-              ctx, lib->full_prefix,
-              params->mask & UCC_CONTEXT_PARAM_FIELD_TYPE ? ucc_context_type_str(params->type) : "n/a",
-              ucc_thread_mode_str(ctx->thread_mode),
-              params->mask & UCC_CONTEXT_PARAM_FIELD_OOB ? "true" : "false",
-              config->estimated_num_eps,
-              config->estimated_num_ppn);
+    ucc_debug("created ucc context %p for lib %s", ctx, lib->full_prefix);
     *context = ctx;
     return UCC_OK;
 
@@ -957,7 +927,6 @@ ucc_status_t ucc_context_destroy(ucc_context_t *context)
         tl_lib->iface->context.destroy(&context->service_ctx->super);
     }
 
-    ucc_config_names_array_free(&context->net_devices);
     ucc_context_topo_cleanup(context->topo);
     ucc_progress_queue_finalize(context->pq);
     ucc_free(context->addr_storage.storage);
@@ -1175,365 +1144,4 @@ ucc_status_t ucc_context_get_attr(ucc_context_t      *context,
     }
 
     return status;
-}
-
-ucc_status_t ucc_mem_map_import(ucc_context_h        context,
-                                ucc_mem_map_mode_t   mode,
-                                const ucc_mem_map_params_t *params, size_t *memh_size,
-                                ucc_mem_map_mem_h *memh)
-{
-    ucc_context_t            *ctx    = (ucc_context_t *)context;
-    ucc_status_t              status = UCC_OK;
-    ucc_config_names_array_t *tls    = &ctx->all_tls;
-    size_t                    offset = 0;
-    int                       i;
-    ucc_mem_map_memh_t       *local_memh;
-    ucc_tl_lib_t             *tl_lib;
-
-    if (!memh) {
-        ucc_error("cannot import NULL memory handle");
-        return UCC_ERR_INVALID_PARAM;
-    }
-    if (!params) {
-        ucc_error("params cannot be NULL");
-        return UCC_ERR_INVALID_PARAM;
-    }
-
-    local_memh = *memh;
-
-    if (ctx->n_tl_ctx == 0) {
-        ucc_debug("No TL contexts available for import");
-        local_memh->mode    = mode;
-        local_memh->context = ctx;
-        *memh_size          = 0;
-        return UCC_OK;
-    }
-
-    /* memh should have been used in exchanges or from a remote process,
-       addresses, etc. likely garbage. fix it */
-    local_memh->tl_h = (ucc_mem_map_tl_t *)ucc_calloc(
-        ctx->n_tl_ctx, sizeof(ucc_mem_map_tl_t), "tl memh");
-    if (!local_memh->tl_h) {
-        ucc_error("failed to allocate tl memh for import");
-        return UCC_ERR_NO_MEMORY;
-    }
-
-    for (i = 0; i < ctx->n_tl_ctx; i++) {
-        offset = 0;
-        for (int j = 0; j < local_memh->num_tls; j++) {
-            char *name          = PTR_OFFSET(local_memh->pack_buffer, offset);
-            size_t *packed_size = PTR_OFFSET(local_memh->pack_buffer, offset + UCC_MEM_MAP_TL_NAME_LEN);
-            if (strcmp(name, tls->names[i]) == 0) {
-                tl_lib = ucc_derived_of(ctx->tl_ctx[i]->super.lib, ucc_tl_lib_t);
-                strncpy(local_memh->tl_h[j].tl_name, tls->names[i], UCC_MEM_MAP_TL_NAME_LEN - 1);
-                status = tl_lib->iface->context.mem_map(
-                    (const ucc_base_context_t *)ctx->tl_ctx[i], mode,
-                    local_memh, &local_memh->tl_h[j]);
-                if (status < UCC_ERR_NOT_IMPLEMENTED) {
-                    ucc_error("failed to import mem map memh %d", status);
-                    ucc_free(local_memh->tl_h);
-                    return status;
-                }
-            }
-            offset += UCC_MEM_MAP_TL_NAME_LEN + sizeof(size_t) + *packed_size;
-        }
-    }
-    local_memh->mode    = mode;
-    /* fix context as it will be incorrect on a different system */
-    local_memh->context = ctx;
-    *memh_size          = 0;
-
-    return status;
-}
-
-ucc_status_t ucc_mem_map_export(ucc_context_h         context,
-                                ucc_mem_map_mode_t    mode,
-                                const ucc_mem_map_params_t *params,
-                                size_t               *memh_size,
-                                ucc_mem_map_mem_h    *memh)
-{
-    ucc_context_t            *ctx             = (ucc_context_t *)context;
-    size_t                    total_pack_size = 0;
-    int                       packed_tls      = 0;
-    size_t                    offset          = 0;
-    ucc_config_names_array_t *tls_names       = &ctx->all_tls;
-    ucc_mem_map_memh_t       *local_memh;
-    ucc_mem_map_memh_t       *exported_memh;
-    void                    **packed_buffers;
-    ucc_status_t              status;
-    ucc_tl_lib_t             *tl_lib;
-    int                       i;
-    int                       tls;
-    int                       tlh_index;
-
-    if (!params) {
-        ucc_error("params cannot be NULL");
-        return UCC_ERR_INVALID_PARAM;
-    }
-
-    if (ctx->n_tl_ctx == 0) {
-        ucc_debug("No TL contexts available for export");
-        return UCC_OK;
-    }
-
-    if (mode == UCC_MEM_MAP_MODE_EXPORT) {
-        local_memh = (ucc_mem_map_memh_t *)ucc_calloc(1, sizeof(ucc_mem_map_memh_t),
-                                                      "local memh");
-        if (!local_memh) {
-            ucc_error("failed to allocate a local memory handle");
-            return UCC_ERR_NO_MEMORY;
-        }
-
-        local_memh->tl_h = (ucc_mem_map_tl_t *)ucc_calloc(
-            ctx->n_tl_ctx, sizeof(ucc_mem_map_tl_t), "tl memh");
-        if (!local_memh->tl_h) {
-            ucc_error("failed to allocate a local memory handle");
-            ucc_free(local_memh);
-            return UCC_ERR_NO_MEMORY;
-        }
-        local_memh->address = params->segments[0].address;
-        local_memh->len     = params->segments[0].len;
-    } else {
-        if (!memh) {
-            ucc_error("unable to export map NULL memory handle");
-            return UCC_ERR_INVALID_PARAM;
-        }
-        local_memh = *memh;
-    }
-    if (mode != UCC_MEM_MAP_MODE_EXPORT_OFFLOAD) {
-        /* map all the memory */
-        for (i = 0; i < ctx->n_tl_ctx; i++) {
-            tl_lib = ucc_derived_of(ctx->tl_ctx[i]->super.lib, ucc_tl_lib_t);
-            /* always treat as a local mem handle */
-            status = tl_lib->iface->context.mem_map(
-                (const ucc_base_context_t *)ctx->tl_ctx[i], mode,
-                local_memh, &local_memh->tl_h[i]);
-            if (status != UCC_OK) {
-                if (status < UCC_ERR_NOT_IMPLEMENTED) {
-                    ucc_error("failed to map memory");
-                    goto failed_mem_map;
-                }
-                if (status == UCC_ERR_NOT_IMPLEMENTED ||
-                    status == UCC_ERR_NOT_SUPPORTED) {
-                    /* either not implemented or not supported, set memh to null */
-                    local_memh->tl_h[i].packed_size = 0;
-                }
-            }
-        }
-    }
-    packed_buffers =
-        (void **)ucc_calloc(ctx->n_tl_ctx, sizeof(void *), "packed buffers");
-    if (!packed_buffers) {
-        if (mode == UCC_MEM_MAP_MODE_EXPORT) {
-            ucc_free(local_memh->tl_h);
-            ucc_free(local_memh);
-        }
-        ucc_error("failed to allocate space for packed buffers");
-        return UCC_ERR_NO_MEMORY;
-    }
-    /* now pack all the memories */
-    for (i = 0; i < ctx->n_tl_ctx; i++) {
-        tl_lib = ucc_derived_of(ctx->tl_ctx[i]->super.lib, ucc_tl_lib_t);
-        if (mode != UCC_MEM_MAP_MODE_EXPORT_OFFLOAD) {
-            tlh_index = i;
-        } else {
-            tlh_index = -1;
-            for (int j = 0; j < local_memh->num_tls; j++) {
-                if (strcmp(local_memh->tl_h[j].tl_name, tls_names->names[i]) == 0) {
-                    tlh_index = j;
-                    break;
-                }
-            }
-            if (tlh_index == -1) {
-                /* this TL is not in the memory handle, goto next */
-                continue;
-            }
-        }
-        /* tl should set packed_size, allocate buffer, pack memh */
-        status = tl_lib->iface->context.memh_pack(
-            (const ucc_base_context_t *)ctx->tl_ctx[i],
-            mode, &local_memh->tl_h[tlh_index], &packed_buffers[tlh_index]);
-        if (status != UCC_OK) {
-            if (status < UCC_ERR_NOT_IMPLEMENTED) {
-                ucc_error("failed to pack memory handles");
-                goto failed_pack;
-            }
-        }
-        if (local_memh->tl_h[tlh_index].packed_size) {
-            ++packed_tls;
-        }
-        total_pack_size += local_memh->tl_h[tlh_index].packed_size;
-    }
-    if (packed_tls == 0) {
-        ucc_debug("No TLs available for packing");
-        ucc_free(packed_buffers);
-        if (mode == UCC_MEM_MAP_MODE_EXPORT) {
-            ucc_free(local_memh->tl_h);
-            ucc_free(local_memh);
-        }
-        return UCC_OK;
-    }
-
-    /* allocate exported memh, copy items over */
-    exported_memh = (ucc_mem_map_memh_t *)ucc_calloc(
-        1,
-        sizeof(ucc_mem_map_memh_t) + total_pack_size +
-            2 * sizeof(size_t) * packed_tls,
-        "exported memh");
-    if (!exported_memh) {
-        ucc_error("failed to allocate handle for exported buffers");
-        status = UCC_ERR_NO_MEMORY;
-        goto failed_pack;
-    }
-
-    /* copy or allocate depending on the mode */
-    if (mode == UCC_MEM_MAP_MODE_EXPORT) {
-        exported_memh->tl_h = (ucc_mem_map_tl_t *)ucc_calloc(
-                packed_tls, sizeof(ucc_mem_map_tl_t), "packed tl memh");
-        if (!exported_memh->tl_h) {
-            ucc_error("failed to allocate handle for exported buffers' tl handles");
-            status = UCC_ERR_NO_MEMORY;
-            ucc_free(exported_memh);
-            goto failed_pack;
-        }
-        for (i = 0, offset = 0, tls = 0; i < ctx->n_tl_ctx; i++) {
-            if (local_memh->tl_h[i].packed_size) {
-                strncpy(PTR_OFFSET(exported_memh->pack_buffer, offset),
-                       local_memh->tl_h[i].tl_name, UCC_MEM_MAP_TL_NAME_LEN);
-                offset += UCC_MEM_MAP_TL_NAME_LEN;
-                memcpy(PTR_OFFSET(exported_memh->pack_buffer, offset),
-                       &local_memh->tl_h[i].packed_size, sizeof(size_t));
-                offset += sizeof(size_t);
-                memcpy(PTR_OFFSET(exported_memh->pack_buffer, offset),
-                       packed_buffers[i], local_memh->tl_h[i].packed_size);
-                ucc_free(packed_buffers[i]);
-                offset += local_memh->tl_h[i].packed_size;
-                memcpy(&exported_memh->tl_h[tls++], &local_memh->tl_h[i],
-                       sizeof(ucc_mem_map_tl_t));
-            }
-        }
-    } else {
-        exported_memh->tl_h = local_memh->tl_h;
-
-        for (i = 0; i < local_memh->num_tls; i++) {
-            /* these are already packed in order */
-            strncpy(PTR_OFFSET(exported_memh->pack_buffer, offset),
-                   local_memh->tl_h[i].tl_name, UCC_MEM_MAP_TL_NAME_LEN);
-            offset += UCC_MEM_MAP_TL_NAME_LEN;
-            memcpy(PTR_OFFSET(exported_memh->pack_buffer, offset),
-                   &local_memh->tl_h[i].packed_size, sizeof(size_t));
-            offset += sizeof(size_t);
-            memcpy(PTR_OFFSET(exported_memh->pack_buffer, offset),
-                   packed_buffers[i], local_memh->tl_h[i].packed_size);
-            ucc_free(packed_buffers[i]);
-            offset += local_memh->tl_h[i].packed_size;
-        }
-    }
-
-    exported_memh->mode        = mode;
-    exported_memh->context     = ctx;
-    exported_memh->address     = local_memh->address;
-    exported_memh->len         = local_memh->len;
-    exported_memh->num_tls     = packed_tls;
-    *memh                      = exported_memh;
-    *memh_size                 = sizeof(ucc_mem_map_memh_t) + offset;
-    if (mode == UCC_MEM_MAP_MODE_EXPORT) {
-        ucc_free(local_memh->tl_h);
-    }
-    ucc_free(local_memh);
-    ucc_free(packed_buffers);
-    return UCC_OK;
-failed_pack:
-    for (int j = 0; j < i; j++) {
-        ucc_free(packed_buffers[j]);
-    }
-    i = ctx->n_tl_ctx;
-failed_mem_map:
-    for (int j = 0; j < i; j++) {
-        tl_lib = ucc_derived_of(ctx->tl_ctx[i]->super.lib, ucc_tl_lib_t);
-        tl_lib->iface->context.mem_unmap((const ucc_base_context_t *)ctx,
-                                         UCC_MEM_MAP_MODE_EXPORT,
-                                         &local_memh->tl_h[j]);
-    }
-    if (mode == UCC_MEM_MAP_MODE_EXPORT) {
-        ucc_free(local_memh->tl_h);
-    }
-    ucc_free(local_memh);
-    *memh      = NULL;
-    *memh_size = 0;
-    return status;
-}
-
-ucc_status_t ucc_mem_map(ucc_context_h context, ucc_mem_map_mode_t mode,
-                         const ucc_mem_map_params_t *params, size_t *memh_size,
-                         ucc_mem_map_mem_h *memh)
-{
-    if (mode >= UCC_MEM_MAP_MODE_LAST) {
-        ucc_error("Invalid memory map mode: %d", mode);
-        return UCC_ERR_INVALID_PARAM;
-    }
-    if (mode == UCC_MEM_MAP_MODE_IMPORT || mode == UCC_MEM_MAP_MODE_IMPORT_OFFLOAD) {
-        return ucc_mem_map_import(context, mode, params, memh_size, memh);
-    }
-    if (!params) {
-        ucc_error("params cannot be NULL");
-        return UCC_ERR_INVALID_PARAM;
-    }
-    if (params->n_segments > 1) {
-        ucc_error("UCC only supports one mapping per call");
-        return UCC_ERR_INVALID_PARAM;
-    }
-    return ucc_mem_map_export(context, mode, params, memh_size, memh);
-}
-
-ucc_status_t ucc_mem_unmap(ucc_mem_map_mem_h *memh)
-{
-    ucc_context_t            *ctx;
-    ucc_status_t              status;
-    ucc_mem_map_memh_t       *lmemh;
-    ucc_tl_lib_t             *tl_lib;
-    int                       i;
-    int                       j;
-    ucc_config_names_array_t *tls;
-
-    if (!memh) {
-        ucc_warn("unable to free NULL memh");
-        return UCC_ERR_INVALID_PARAM;
-    }
-
-    if (!*memh) {
-        ucc_warn("unable to free NULL memory handle");
-        return UCC_ERR_INVALID_PARAM;
-    }
-
-    lmemh = *memh;
-    ctx   = (ucc_context_t *)lmemh->context;
-    tls   = &ctx->all_tls;
-    for (i = 0; i < ctx->n_tl_ctx; i++) {
-        for (j = 0; j < lmemh->num_tls; j++) {
-            if (strcmp(lmemh->tl_h[j].tl_name, tls->names[i]) == 0) {
-                tl_lib = ucc_derived_of(ctx->tl_ctx[i]->super.lib, ucc_tl_lib_t);
-                status = tl_lib->iface->context.mem_unmap(
-                    (const ucc_base_context_t *)ctx->tl_ctx[i], lmemh->mode,
-                    &lmemh->tl_h[j]);
-                if (status < UCC_ERR_NOT_IMPLEMENTED) {
-                    ucc_error("error during unmap operation on TL %s",
-                              lmemh->tl_h[j].tl_name);
-                    return status;
-                }
-            }
-        }
-    }
-
-    /* Free the TL handles array if it was allocated separately */
-    if (lmemh->tl_h && (lmemh->mode == UCC_MEM_MAP_MODE_EXPORT ||
-                        lmemh->mode == UCC_MEM_MAP_MODE_IMPORT)) {
-        ucc_free(lmemh->tl_h);
-    }
-
-    /* Free the memory handle structure */
-    ucc_free(lmemh);
-    *memh = NULL;
-
-    return UCC_OK;
 }

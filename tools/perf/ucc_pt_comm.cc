@@ -1,7 +1,5 @@
-#include <ios>
 #include <iostream>
 #include <cstring>
-#include <iomanip>
 #include "ucc_pt_comm.h"
 #include "ucc_pt_bootstrap_mpi.h"
 #include "ucc_perftest.h"
@@ -28,14 +26,7 @@ void ucc_pt_comm::set_gpu_device()
     int dev_count = 0;
 
     if (ucc_pt_cudaGetDeviceCount(&dev_count) == 0 && dev_count != 0) {
-        int dev   = bootstrap->get_local_rank() % dev_count;
-        ucc_pt_cudaSetDevice(dev);
-        std::string info;
-        ucc_pt_cudaGetDeviceInfo(dev, info);
-        std::cout << std::left << std::setw(8) << "Rank "
-                  << std::setw(8) << bootstrap->get_rank() << ": " << info
-                  << std::endl;
-        std::cout << std::right;
+        ucc_pt_cudaSetDevice(bootstrap->get_local_rank() % dev_count);
         return;
     }
 
@@ -87,18 +78,16 @@ ucc_ee_h ucc_pt_comm::get_ee()
     return ee;
 }
 
-ucc_ee_executor_t *ucc_pt_comm::get_executor()
+ucc_ee_executor_t* ucc_pt_comm::get_executor()
 {
     ucc_ee_executor_params_t executor_params;
     ucc_status_t             status;
 
     if (!executor) {
         executor_params.mask = UCC_EE_EXECUTOR_PARAM_FIELD_TYPE;
-        if (cfg.mt == UCC_MEMORY_TYPE_HOST) {
+        if (cfg.mt ==  UCC_MEMORY_TYPE_HOST) {
             executor_params.ee_type = UCC_EE_CPU_THREAD;
-        } else if (
-            cfg.mt == UCC_MEMORY_TYPE_CUDA ||
-            cfg.mt == UCC_MEMORY_TYPE_CUDA_MANAGED) {
+        } else if (cfg.mt == UCC_MEMORY_TYPE_CUDA) {
             executor_params.ee_type = UCC_EE_CUDA_STREAM;
         } else if (cfg.mt == UCC_MEMORY_TYPE_ROCM) {
             executor_params.ee_type = UCC_EE_ROCM_STREAM;
@@ -135,15 +124,13 @@ ucc_status_t ucc_pt_comm::init()
     ucc_status_t st;
     std::string cfg_mod;
 
-    ee           = nullptr;
-    executor     = nullptr;
-    stream       = nullptr;
-    onesided_buf = nullptr;
+    ee       = nullptr;
+    executor = nullptr;
+    stream   = nullptr;
 
     if (cfg.mt != UCC_MEMORY_TYPE_HOST) {
         set_gpu_device();
     }
-
     UCCCHECK_GOTO(ucc_lib_config_read("PERFTEST", nullptr, &lib_config),
                   exit_err, st);
     std::memset(&lib_params, 0, sizeof(ucc_lib_params_t));
@@ -157,8 +144,6 @@ ucc_status_t ucc_pt_comm::init()
         return UCC_ERR_INVALID_PARAM;
     }
 
-    onesided_buf = ucc_calloc(1024, bootstrap->get_size(), "onesided_buf");
-
     UCCCHECK_GOTO(ucc_context_config_read(lib, NULL, &ctx_config),
                   free_lib, st);
     cfg_mod = std::to_string(bootstrap->get_size());
@@ -167,21 +152,11 @@ ucc_status_t ucc_pt_comm::init()
     cfg_mod = std::to_string(bootstrap->get_ppn());
     UCCCHECK_GOTO(ucc_context_config_modify(ctx_config, NULL,
                   "ESTIMATED_NUM_PPN", cfg_mod.c_str()), free_ctx_config, st);
-    cfg_mod = std::to_string(bootstrap->get_local_rank());
-    UCCCHECK_GOTO(ucc_context_config_modify(ctx_config, NULL,
-                  "NODE_LOCAL_ID", cfg_mod.c_str()), free_ctx_config, st);
     std::memset(&ctx_params, 0, sizeof(ucc_context_params_t));
     ctx_params.mask = UCC_CONTEXT_PARAM_FIELD_TYPE |
-                      UCC_CONTEXT_PARAM_FIELD_OOB |
-                      UCC_CONTEXT_PARAM_FIELD_MEM_PARAMS;
+                      UCC_CONTEXT_PARAM_FIELD_OOB;
     ctx_params.type = UCC_CONTEXT_SHARED;
     ctx_params.oob  = bootstrap->get_context_oob();
-    ucc_mem_map_t map_segments[1];
-
-    map_segments[0].address = onesided_buf;
-    map_segments[0].len = 1024;
-    ctx_params.mem_params.segments = map_segments;
-    ctx_params.mem_params.n_segments = 1;
     UCCCHECK_GOTO(ucc_context_create(lib, &ctx_params, ctx_config, &context),
                   free_ctx_config, st);
     team_params.mask     = UCC_TEAM_PARAM_FIELD_EP |
@@ -194,9 +169,6 @@ ucc_status_t ucc_pt_comm::init()
                   free_ctx, st);
     do {
         st = ucc_team_create_test(team);
-        if (st == UCC_INPROGRESS) {
-            ucc_context_progress(context);
-        }
     } while(st == UCC_INPROGRESS);
     UCCCHECK_GOTO(st, free_ctx, st);
     ucc_context_config_release(ctx_config);
@@ -243,21 +215,11 @@ ucc_status_t ucc_pt_comm::finalize()
 
     do {
         status = ucc_team_destroy(team);
-        if (status == UCC_INPROGRESS) {
-            ucc_context_progress(context);
-        }
     } while (status == UCC_INPROGRESS);
-
     if (status != UCC_OK) {
         std::cerr << "ucc team destroy error: " << ucc_status_string(status);
     }
-
     ucc_context_destroy(context);
-
-    if (onesided_buf) {
-        ucc_free(onesided_buf);
-    }
-
     ucc_finalize(lib);
     return UCC_OK;
 }
@@ -295,42 +257,11 @@ ucc_status_t ucc_pt_comm::allreduce(double* in, double* out, size_t size,
     args.dst.info.count       = size;
     args.dst.info.datatype    = UCC_DT_FLOAT64;
     args.dst.info.mem_type    = UCC_MEMORY_TYPE_HOST;
-
     ucc_collective_init(&args, &req, team);
     ucc_collective_post(req);
-
     do {
         ucc_context_progress(context);
     } while (ucc_collective_test(req) == UCC_INPROGRESS);
     ucc_collective_finalize(req);
     return UCC_OK;
-}
-
-ucc_status_t ucc_pt_comm::bcast(void *data, size_t size, int root)
-{
-    ucc_coll_args_t args;
-    ucc_coll_req_h req;
-
-    args.mask              = 0;
-    args.coll_type         = UCC_COLL_TYPE_BCAST;
-    args.src.info.buffer   = data;
-    args.src.info.count    = size;
-    args.src.info.datatype = UCC_DT_INT8;
-    args.src.info.mem_type = UCC_MEMORY_TYPE_HOST;
-    args.root              = root;
-
-    ucc_collective_init(&args, &req, team);
-    ucc_collective_post(req);
-
-    do {
-        ucc_context_progress(context);
-    } while (ucc_collective_test(req) == UCC_INPROGRESS);
-
-    ucc_collective_finalize(req);
-    return UCC_OK;
-}
-
-void *ucc_pt_comm::get_onesided_buf()
-{
-    return onesided_buf;
 }

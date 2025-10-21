@@ -11,5 +11,6 @@ Checks: >
     readability-redundant-control-flow
 WarningsAsErrors: '*'
 HeaderFilterRegex: ''
+AnalyzeTemporaryDtors: false
 FormatStyle:     none
 ...

@@ -114,22 +114,21 @@ UccTestMpi::UccTestMpi(int argc, char *argv[], ucc_thread_mode_t _tm,
         onesided_ctx = nullptr;
     }
     set_msgsizes(8, ((1ULL) << 21), 8);
-    dtypes             = {UCC_DT_INT16,           UCC_DT_INT32,
-                          UCC_DT_INT64,           UCC_DT_UINT16,
-                          UCC_DT_UINT32,          UCC_DT_UINT64,
-                          UCC_DT_FLOAT32,         UCC_DT_FLOAT64,
-                          UCC_DT_FLOAT128,        UCC_DT_FLOAT32_COMPLEX,
-                          UCC_DT_FLOAT64_COMPLEX, UCC_DT_FLOAT128_COMPLEX};
-    ops                = {UCC_OP_SUM, UCC_OP_MAX};
-    colls              = {UCC_COLL_TYPE_BARRIER, UCC_COLL_TYPE_ALLREDUCE};
-    mtypes             = {UCC_MEMORY_TYPE_HOST};
-    inplace            = false;
-    persistent         = false;
-    root_type          = ROOT_RANDOM;
-    root_value         = 10;
-    iterations         = 1;
-    triggered          = false;
-    local_registration = false;
+    dtypes     = {UCC_DT_INT16,           UCC_DT_INT32,
+              UCC_DT_INT64,           UCC_DT_UINT16,
+              UCC_DT_UINT32,          UCC_DT_UINT64,
+              UCC_DT_FLOAT32,         UCC_DT_FLOAT64,
+              UCC_DT_FLOAT128,        UCC_DT_FLOAT32_COMPLEX,
+              UCC_DT_FLOAT64_COMPLEX, UCC_DT_FLOAT128_COMPLEX};
+    ops        = {UCC_OP_SUM, UCC_OP_MAX};
+    colls      = {UCC_COLL_TYPE_BARRIER, UCC_COLL_TYPE_ALLREDUCE};
+    mtypes     = {UCC_MEMORY_TYPE_HOST};
+    inplace    = false;
+    persistent = false;
+    root_type  = ROOT_RANDOM;
+    root_value = 10;
+    iterations = 1;
+    triggered  = false;
 }
 
 void UccTestMpi::set_iter(int iter)
@@ -496,9 +495,6 @@ std::vector<ucc_test_mpi_result_t> UccTestMpi::exec_tests(
                        std::cout << tc->str() << std::endl;
                     }
                 }
-                if (tc->args.flags & UCC_COLL_ARGS_FLAG_MEM_MAPPED_BUFFERS) {
-                    MPI_Barrier(MPI_COMM_WORLD);
-                }
                 tc->run(triggered);
             } else {
                 if (verbose && 0 == world_rank) {
@@ -543,10 +539,9 @@ void UccTestMpi::run_all_at_team(ucc_test_team_t &team,
 {
     TestCaseParams params;
 
-    params.max_size           = test_max_size;
-    params.inplace            = inplace;
-    params.persistent         = persistent;
-    params.local_registration = local_registration;
+    params.max_size   = test_max_size;
+    params.inplace    = inplace;
+    params.persistent = persistent;
 
     for (auto i = 0; i < iterations; i++) {
         for (auto &c : colls) {

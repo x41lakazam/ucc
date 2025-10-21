@@ -210,7 +210,6 @@ ALLTOALL_BRUCK_PHASE_SENDRECV:
         eargs.copy.src  = mergebuf;
         eargs.copy.dst  = args->dst.info.buffer;
         eargs.copy.len  = seg_size * tsize;
-        eargs.flags     = 0;
         status = ucc_ee_executor_task_post(exec, &eargs,
                                            &task->alltoall_bruck.etask);
         if (ucc_unlikely(status != UCC_OK)) {
@@ -253,7 +252,6 @@ ucc_status_t ucc_tl_ucp_alltoall_bruck_start(ucc_coll_task_t *coll_task)
         eargs.copy.src  = args->src.info.buffer;
         eargs.copy.dst  = task->alltoall_bruck.src;
         eargs.copy.len  = size;
-        eargs.flags     = 0;
         status = ucc_ee_executor_task_post(exec, &eargs,
                                            &task->alltoall_bruck.etask);
         if (ucc_unlikely(status != UCC_OK)) {

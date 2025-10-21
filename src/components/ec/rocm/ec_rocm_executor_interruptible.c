@@ -5,7 +5,6 @@
  * See file LICENSE for terms.
  */
 
-#include <stdbool.h>
 #include "ec_rocm_executor.h"
 #include "components/mc/ucc_mc.h"
 #include "components/ec/ucc_ec.h"

@@ -8,9 +8,6 @@
 #include "tl_cuda_coll.h"
 #include "tl_cuda_topo.h"
 #include "tl_cuda_cache.h"
-#ifdef HAVE_NVLS
-#include "tl_cuda_nvls.h"
-#endif
 #include "core/ucc_team.h"
 #include "coll_score/ucc_coll_score.h"
 #include "utils/arch/cpu.h"
@@ -147,12 +144,6 @@ UCC_CLASS_CLEANUP_FUNC(ucc_tl_cuda_team_t)
     if (self->topo) {
         ucc_tl_cuda_team_topo_destroy(self->topo);
     }
-
-#ifdef HAVE_NVLS
-    // destroy the nvls context
-    ucc_tl_cuda_nvls_destroy(self, self->super.super.context);
-#endif
-
     if (self->ids) {
         if (self->sync != (void*)-1) {
             for (i = 0; i < resource_num; i++) {
@@ -241,7 +232,7 @@ ucc_status_t ucc_tl_cuda_team_create_test(ucc_base_team_t *tl_team)
     team->oob_req = (void*)0x1;
 
     for (i = 0; i < UCC_TL_TEAM_SIZE(team); i++) {
-        team->scratch.rem[i] = NULL;
+           team->scratch.rem[i] = NULL;
     }
 
     status = ucc_tl_cuda_team_topo_create(&team->super, &team->topo);
@@ -261,12 +252,11 @@ ucc_status_t ucc_tl_cuda_team_create_test(ucc_base_team_t *tl_team)
                                            team->ids[i].scratch_info.handle,
                                            &team->scratch.rem[i],
                                            ucc_tl_cuda_get_cache(team, i));
-        if (status != UCC_OK) {
-            tl_error(tl_team->context->lib, "failed to map memhandle");
-            goto exit_err;
-        }
         memcpy(&team->scratch.rem_info[i], &team->ids[i].scratch_info,
                sizeof(ucc_tl_cuda_mem_info_t));
+        if (status != UCC_OK) {
+            goto exit_err;
+        }
     }
 
     if (UCC_TL_TEAM_LIB(team)->log_component.log_level >= UCC_LOG_LEVEL_DEBUG) {
@@ -294,10 +284,8 @@ ucc_status_t ucc_tl_cuda_team_create_test(ucc_base_team_t *tl_team)
     team->sync_state = (ucc_tl_cuda_sync_state_t*)PTR_OFFSET(team->bar,
                             sizeof(ucc_tl_cuda_shm_barrier_t) *
                             resource_num);
-
     CUDA_CHECK_GOTO(cudaStreamCreateWithFlags(&team->stream,
-        cudaStreamNonBlocking), exit_err, status);
-
+                    cudaStreamNonBlocking), exit_err, status);
     for (i = 0; i < resource_num; i++) {
         sync = UCC_TL_CUDA_TEAM_SYNC(team, UCC_TL_TEAM_RANK(team), i);
         CUDA_CHECK_GOTO(cudaEventCreateWithFlags(&sync->ipc_event_local,
@@ -334,24 +322,12 @@ barrier:
             }
             peer_sync = UCC_TL_CUDA_TEAM_SYNC(team, j, i);
             CUDA_CHECK_GOTO(cudaIpcOpenEventHandle(&sync->data[j].ipc_event_remote,
-                                                  peer_sync->ev_handle),
-                           exit_err, status);
+                                                   peer_sync->ev_handle),
+                            exit_err, status);
         }
     }
     team->oob_req = NULL;
     tl_debug(tl_team->context->lib, "initialized tl team: %p", team);
-
-#ifdef HAVE_NVLS
-    // zero out the nvls struct
-    memset(&team->nvls, 0, sizeof(team->nvls));
-    // initialize the nvls struct
-    status = ucc_tl_cuda_nvls_init(team, tl_team->context);
-    if (status != UCC_OK) {
-        ucc_error("failed to init nvls multicast");
-        goto exit_err;
-    }
-#endif
-
     return UCC_OK;
 
 exit_err:

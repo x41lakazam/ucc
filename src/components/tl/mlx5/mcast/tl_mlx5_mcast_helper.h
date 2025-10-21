@@ -10,7 +10,6 @@
 #include "tl_mlx5_mcast_one_sided_progress.h"
 #include "utils/ucc_math.h"
 #include "tl_mlx5.h"
-#include "tl_mlx5_mcast_hca_copy.h"
 
 static inline ucc_status_t ucc_tl_mlx5_mcast_poll_send(ucc_tl_mlx5_mcast_coll_comm_t *comm)
 {
@@ -70,8 +69,7 @@ static inline ucc_status_t ucc_tl_mlx5_mcast_send(ucc_tl_mlx5_mcast_coll_comm_t 
     struct ibv_send_wr *swr            = &comm->mcast.swr;
     struct ibv_sge     *ssg            = &comm->mcast.ssg;
     int                 max_per_packet = comm->max_per_packet;
-    int                 offset = req->offset;
-    int                 i;
+    int                 offset         = req->offset, i;
     struct ibv_send_wr *bad_wr;
     struct pp_packet   *pp;
     int                 rc;
@@ -117,7 +115,7 @@ static inline ucc_status_t ucc_tl_mlx5_mcast_send(ucc_tl_mlx5_mcast_coll_comm_t 
         }
 
         ssg[0].length     = length;
-        ssg[0].lkey       = zcopy ? req->mr->lkey : comm->pp_mr->lkey;
+        ssg[0].lkey       = req->mr->lkey;
         swr[0].wr.ud.ah   = comm->mcast.groups[0].ah;
         swr[0].wr_id      = MCAST_BCASTSEND_WR;
         swr[0].imm_data   = htonl(pp->psn);
@@ -300,10 +298,6 @@ static inline ucc_status_t ucc_tl_mlx5_mcast_send_collective(ucc_tl_mlx5_mcast_c
     struct pp_packet   *pp;
     int                 rc;
     int                 length;
-    ucc_status_t        status;
-    int                 use_zcopy;
-    ucc_memory_type_t   src_mem_type;
-    ucc_memory_type_t   dst_mem_type;
 
     ucc_assert(mcast_group_index <= comm->mcast_group_count);
 
@@ -323,7 +317,7 @@ static inline ucc_status_t ucc_tl_mlx5_mcast_send_collective(ucc_tl_mlx5_mcast_c
         __builtin_prefetch((void*) pp->buf);
         __builtin_prefetch(req->ptr + offset);
 
-        length = (req->to_send == 1) ? (req->length - offset) : comm->max_per_packet;
+        length      = comm->max_per_packet;
         pp->length  = length;
 
         // generate psn to be used as immediate data
@@ -335,22 +329,8 @@ static inline ucc_status_t ucc_tl_mlx5_mcast_send_collective(ucc_tl_mlx5_mcast_c
 
         ssg[0].addr = (uintptr_t)req->ptr + offset;
 
-        /* Enable zero-copy if we have registered CUDA memory, even with staging protocol */
-        use_zcopy = zcopy || (comm->cuda_mem_enabled && req->mr && req->mr != comm->pp_mr);
-
-        if (use_zcopy && comm->cuda_mem_enabled && req->mr != comm->pp_mr) {
-            tl_trace(comm->lib, "using zero-copy sending for CUDA memory, length %d", length);
-        }
-
-        if (!use_zcopy) {
-            src_mem_type = comm->cuda_mem_enabled ? UCC_MEMORY_TYPE_CUDA : UCC_MEMORY_TYPE_HOST;
-            dst_mem_type = UCC_MEMORY_TYPE_HOST; // staging buffer is always HOST
-            status       = ucc_tl_mlx5_mcast_memcpy((void*) pp->buf, dst_mem_type,
-                                                     req->ptr + offset, src_mem_type, length, comm);
-            if (ucc_unlikely(status != UCC_OK)) {
-                tl_error(comm->lib, "failed to copy buffer to staging area");
-                return status;
-            }
+        if (!zcopy) {
+            memcpy((void*) pp->buf, req->ptr + offset, length);
             ssg[0].addr = (uint64_t) pp->buf;
             ssg[0].lkey = comm->pp_mr->lkey;
         } else {
@@ -372,13 +352,15 @@ static inline ucc_status_t ucc_tl_mlx5_mcast_send_collective(ucc_tl_mlx5_mcast_c
 
         swr[0].wr.ud.ah = comm->mcast.groups[mcast_group_index].ah;
 
-        tl_trace(comm->lib,
-                 "mcast  post_send, psn %d, length %d, zcopy %d, use_zcopy %d, signaled %d "
-                 "qp->state %d qp->qp_num %d qp->pd %p mcast_group_index %d",
-                 pp->psn, pp->length, zcopy, use_zcopy, swr[0].send_flags & IBV_SEND_SIGNALED,
+        tl_trace(comm->lib, "mcast  post_send, psn %d, length %d, "
+                "zcopy %d, signaled %d qp->state %d qp->qp_num %d qp->pd %p "
+                "mcast_group_index %d",
+                 pp->psn, pp->length, zcopy, swr[0].send_flags &
+                 IBV_SEND_SIGNALED,
                  comm->mcast.groups[mcast_group_index].qp->state,
                  comm->mcast.groups[mcast_group_index].qp->qp_num,
-                 comm->mcast.groups[mcast_group_index].qp->pd, mcast_group_index);
+                 comm->mcast.groups[mcast_group_index].qp->pd,
+                 mcast_group_index);
 
         if (0 != (rc = ibv_post_send(comm->mcast.groups[mcast_group_index].qp, &swr[0], &bad_wr))) {
             tl_error(comm->lib, "post send failed: ret %d, start_psn %d, to_send %d, "
@@ -431,19 +413,18 @@ static inline int ucc_tl_mlx5_mcast_recv_collective(ucc_tl_mlx5_mcast_coll_comm_
 
     wc = ucc_malloc(sizeof(struct ibv_wc) * POLL_PACKED, "WC");
     if (!wc) {
-        recv_progressed = -1;
-        goto exit;
+        return -1;
     }
 
     while (num_left >  recv_progressed)
     {
-        memset(wc, 0, sizeof(struct ibv_wc) * POLL_PACKED);
+        memset(wc, 0, sizeof(sizeof(struct ibv_wc) * POLL_PACKED));
         num_comp = ibv_poll_cq(comm->mcast.rcq, POLL_PACKED, &wc[0]);
 
         if (num_comp < 0) {
             tl_error(comm->lib, "recv queue poll completion failed %d", num_comp);
-            recv_progressed = -1;
-            goto exit;
+            ucc_free(wc);
+            return -1;
         } else if (num_comp == 0) {
             break;
         }
@@ -451,8 +432,7 @@ static inline int ucc_tl_mlx5_mcast_recv_collective(ucc_tl_mlx5_mcast_coll_comm_
         if (IBV_WC_SUCCESS != wc[0].status) {
             tl_error(comm->lib, "mcast_recv: %s err pending_recv %d wr_id %ld num_comp %d byte_len %d\n",
                      ibv_wc_status_str(wc[0].status), comm->pending_recv, wc[0].wr_id, num_comp, wc[0].byte_len);
-            recv_progressed = -1;
-            goto exit;
+            return -1;
         }
 
         real_num_comp = num_comp;
@@ -473,8 +453,8 @@ static inline int ucc_tl_mlx5_mcast_recv_collective(ucc_tl_mlx5_mcast_coll_comm_
             if (UCC_OK != status) {
                 tl_error(comm->lib, "process mcast packet failed, status %d",
                          status);
-                recv_progressed = -1;
-                goto exit;
+                ucc_free(wc);
+                return -1;
             }
 
             recv_progressed++;
@@ -482,14 +462,9 @@ static inline int ucc_tl_mlx5_mcast_recv_collective(ucc_tl_mlx5_mcast_coll_comm_
         }
 
         comm->pending_recv -= num_comp;
-        status = ucc_tl_mlx5_mcast_post_recv_buffers(comm);
-        if (UCC_OK != status) {
-            recv_progressed = -1;
-            goto exit;
-        }
+        ucc_tl_mlx5_mcast_post_recv_buffers(comm);
     }
 
-exit:
     ucc_free(wc);
     return recv_progressed;
 }
@@ -560,14 +535,14 @@ static inline ucc_status_t ucc_tl_mlx5_mcast_reliable(ucc_tl_mlx5_mcast_coll_com
                 return status;
             }
         }
-
+        
         if (comm->bcast_comm.parent_n) {
             status = ucc_tl_mlx5_mcast_poll_recv(comm);
             if (UCC_OK != status) {
                 return status;
             }
         }
-
+        
         status = ucc_tl_mlx5_mcast_check_nack_requests(comm, UINT32_MAX);
         if (UCC_OK != status) {
             return status;
